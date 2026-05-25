@@ -713,10 +713,17 @@ async def list_all_users(callback: CallbackQuery, service: MembershipService, se
         return
     page = int(callback.data.rsplit(":", 1)[1])
     users = await service.list_users(offset=page * 10, limit=10)
+    db_count, abs_count = await service.get_user_counts()
+    abs_count_str = str(abs_count) if abs_count is not None else "未知"
+    text = (
+        "👥 用户列表\n"
+        f"📊 Bot 数据库账号数：{db_count}\n"
+        f"🖥️ ABS 服务器用户数：{abs_count_str}"
+    )
     await callback.answer()
     await replace_panel(
         callback,
-        "用户列表",
+        text,
         reply_markup=users_page_keyboard(users, page=page, kind="users"),
         panel_photo_path=await _panel_photo_path(service),
     )

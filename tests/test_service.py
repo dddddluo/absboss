@@ -1992,3 +1992,39 @@ async def test_list_redeem_codes_usable_filter(session_factory, abs_client):
     assert len(usable_codes) == 2
     codes_set = {c.code for c in usable_codes}
     assert codes_set == {"USABLE1", "USABLE2"}
+
+
+async def test_get_user_counts(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    # 1. Verify initially 0
+    db_count, abs_count = await service.get_user_counts()
+    assert db_count == 0
+    assert abs_count == 0
+
+    # 2. Add some users in DB (one with account, one without account)
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(TgUser(telegram_id=1111, abs_user_id="usr_1111", abs_username="user1"))
+            session.add(TgUser(telegram_id=2222, abs_user_id=None, abs_username=None))
+
+    db_count, abs_count = await service.get_user_counts()
+    assert db_count == 1
+    assert abs_count == 0
+
+    # 3. Add users to ABS client
+    abs_client.users["usr_1111"] = {"id": "usr_1111", "username": "user1"}
+    abs_client.users["usr_3333"] = {"id": "usr_3333", "username": "user3"}
+
+    db_count, abs_count = await service.get_user_counts()
+    assert db_count == 1
+    assert abs_count == 2
+
+    # 4. Mock client error
+    async def bad_list_users():
+        raise RuntimeError("ABS down")
+    abs_client.list_users = bad_list_users
+
+    db_count, abs_count = await service.get_user_counts()
+    assert db_count == 1
+    assert abs_count is None

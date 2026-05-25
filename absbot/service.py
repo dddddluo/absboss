@@ -429,6 +429,21 @@ class MembershipService:
                 stmt = stmt.where(TgUser.is_whitelisted.is_(True))
             return [_normalize_user_datetimes(user) for user in (await session.scalars(stmt)).all()]
 
+    async def get_user_counts(self) -> tuple[int, int | None]:
+        """返回 (bot数据库有账号的用户数, abs服务器的用户数)"""
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(TgUser).where(TgUser.abs_user_id.is_not(None))
+            db_count = int(await session.scalar(stmt) or 0)
+
+        try:
+            abs_users = await self.abs_client.list_users()
+            abs_count = len(abs_users)
+        except Exception as e:
+            logger.warning("获取 ABS 服务器用户数失败: %s", e)
+            abs_count = None
+
+        return db_count, abs_count
+
     async def grant_registration(
         self,
         telegram_id: int,

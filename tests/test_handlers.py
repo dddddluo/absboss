@@ -35,8 +35,9 @@ from absbot.service import ExpirationProcessResult, ExpirationUserResult, Public
 
 
 class User:
-    def __init__(self, user_id):
+    def __init__(self, user_id, is_bot=False):
         self.id = user_id
+        self.is_bot = is_bot
 
 
 class Chat:
@@ -570,6 +571,25 @@ async def test_group_start_delete_failure_is_logged(caplog):
 async def test_group_start_bypasses_membership_middleware(command):
     middleware = handlers.MainGroupMembershipMiddleware()
     message = MembershipCheckMessage(command, chat_type="supergroup")
+    service = MembershipCheckService()
+    handled = []
+
+    async def handler(event, data):
+        handled.append((event, data))
+        return "handled"
+
+    result = await middleware(handler, message, {"service": service})
+
+    assert result == "handled"
+    assert handled == [(message, {"service": service})]
+    assert service.system_settings_calls == 0
+    assert message.bot.chat_member_checks == []
+    assert message.answers == []
+@pytest.mark.asyncio
+async def test_bot_user_bypasses_membership_middleware():
+    middleware = handlers.MainGroupMembershipMiddleware()
+    message = MembershipCheckMessage("/any_command", chat_type="supergroup")
+    message.from_user = User(1087968824, is_bot=True)
     service = MembershipCheckService()
     handled = []
 
