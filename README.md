@@ -1,6 +1,6 @@
 # Audiobookshelf Telegram Bot
 
-Python Telegram bot，用 `/pp` 管理 Audiobookshelf 用户、注册资格、兑换码、签到积分、活跃保号和积分自动续期。
+利用Telegram 机器人管理 Audiobookshelf 用户。
 
 ## 功能
 
@@ -9,20 +9,20 @@ Python Telegram bot，用 `/pp` 管理 Audiobookshelf 用户、注册资格、�
 - 无号用户可绑定已有 Audiobookshelf 账号；如账号已绑定到其他 TG，可提交换绑申请，由管理员在群组中同意或拒绝。
 - 开放注册支持人数名额，用完自动关闭。
 - 兑换码支持注册码、续期码、白名单码。
-- 活跃时间按 Audiobookshelf `lastSeen` 与最近播放会话 `updatedAt` 取最大值。
 - 每日定时任务：活跃保号、积分自动续期。
+- 数据库自动备份。
 
 ## 部署
 
 ### 前提
 
-- 可访问的 MySQL 数据库
 - 已从 BotFather 创建的 bot token
 
 ### 配置环境变量
 
 ```bash
 cp .env.example .env
+cp docker-compose.yml docker-compose.yml
 ```
 
 编辑 `.env`：
@@ -44,22 +44,7 @@ cp .env.example .env
 | `BACKUP_KEEP_COUNT` | | 备份文件保留数量，默认 `7` |
 | `REGISTRATION_QUEUE_DELAY_SECONDS` | | 注册队列处理延迟秒数，默认 `2` |
 
-以下运行期配置已迁移到数据库（`bot_settings`），通过 owner 执行 `/setup` 向导设置：
-
-- Bot 主群组 ID 和群组链接
-- 默认注册天数
-- 签到积分范围
-- 面板图片路径
-- 换绑审核群 ID
-- 禁用账号自动删除等待天数
-
 ### 启动
-
-`MYSQL_DSN` 填写可访问的外部 MySQL 地址，宿主机 MySQL 可用 `host.docker.internal`：
-
-```env
-MYSQL_DSN=mysql+aiomysql://absbot:absbot_password@host.docker.internal:3306/audiobookshelf_bot?charset=utf8mb4
-```
 
 ```bash
 docker compose up -d
@@ -71,9 +56,17 @@ docker compose up -d
 docker compose down
 ```
 
-### 初始化
+更新：
 
-首次启动后，`OWNER_TG_ID` 对应的用户向 bot 私聊发送 `/setup`，按向导完成主群组、注册天数、签到积分等运行期配置。完成后 bot 即可正常使用。
+```bash
+docker compose pull
+docker compose down absboss
+docker compose up -d
+```
+
+
+`首次启动后，`OWNER_TG_ID` 对应的用户向 bot 私聊发送 `/setup`，按向导完成主群组、注册天数、签到积分等运行期配置。完成后 bot 即可正常使用。`
+
 
 ## 开发
 
