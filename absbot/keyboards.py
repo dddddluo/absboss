@@ -84,22 +84,20 @@ def tasks_panel_keyboard(
             text=f"🕒 活跃续期：{'开' if active_enabled else '关'}",
             callback_data="admin:active",
         ),
+        InlineKeyboardButton(text="🔍 执行活跃续期", callback_data="admin:confirm_run:active"),
+    )
+    builder.row(
         InlineKeyboardButton(
             text=f"💎 积分续期：{'开' if points_enabled else '关'}",
             callback_data="admin:pointsrenew",
         ),
+        InlineKeyboardButton(text="💎 执行积分续期", callback_data="admin:confirm_run:points"),
     )
     builder.row(
         InlineKeyboardButton(
             text=f"⏰ 到期检查：{'开' if expiration_enabled else '关'}",
             callback_data="admin:expiration",
         ),
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔍 执行活跃续期", callback_data="admin:confirm_run:active"),
-        InlineKeyboardButton(text="💎 执行积分续期", callback_data="admin:confirm_run:points"),
-    )
-    builder.row(
         InlineKeyboardButton(text="⏰ 执行到期检查", callback_data="admin:confirm_run:expiration"),
     )
     builder.row(
