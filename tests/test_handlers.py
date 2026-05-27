@@ -1928,6 +1928,8 @@ def _settings(
         expiration_enforcement_enabled=True,
         points_unban_enabled=False,
         points_unban_cost_points=100,
+        daily_leaderboard_enabled=True,
+        weekly_leaderboard_enabled=True,
     )
 
 

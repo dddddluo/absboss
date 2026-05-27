@@ -571,3 +571,76 @@ async def test_run_backup_job_cleans_up_old_backups(tmp_path):
 
     remaining = list_local_backups(settings.backup_dir)
     assert len(remaining) == 3  # 3 old + 1 new → keep newest 3 → 1 old removed
+
+
+async def test_run_daily_leaderboard_job_disabled():
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from absbot.leaderboard import LeaderboardResult
+    leaderboard_service = AsyncMock()
+    service = AsyncMock()
+    public_settings = SimpleNamespace(
+        daily_leaderboard_enabled=False,
+        weekly_leaderboard_enabled=True,
+    )
+    system_settings = SimpleNamespace(
+        main_group_chat_id=-100123,
+    )
+    service.get_public_settings.return_value = public_settings
+    service.get_system_settings.return_value = system_settings
+    
+    bot = AsyncMock()
+    
+    from absbot.scheduler import run_daily_leaderboard_job
+    
+    # Run without force -> should be skipped
+    await run_daily_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai")
+    leaderboard_service.get_leaderboard.assert_not_called()
+    bot.send_message.assert_not_called()
+    
+    # Run with force -> should run
+    leaderboard_service.get_leaderboard.return_value = LeaderboardResult(
+        book_entries=[],
+        user_entries=[],
+        total_sessions=0,
+    )
+    await run_daily_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai", force=True)
+    leaderboard_service.get_leaderboard.assert_called_once()
+    bot.send_message.assert_called_once()
+
+
+async def test_run_weekly_leaderboard_job_disabled():
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from absbot.leaderboard import LeaderboardResult
+    leaderboard_service = AsyncMock()
+    service = AsyncMock()
+    public_settings = SimpleNamespace(
+        daily_leaderboard_enabled=True,
+        weekly_leaderboard_enabled=False,
+    )
+    system_settings = SimpleNamespace(
+        main_group_chat_id=-100123,
+    )
+    service.get_public_settings.return_value = public_settings
+    service.get_system_settings.return_value = system_settings
+    
+    bot = AsyncMock()
+    
+    from absbot.scheduler import run_weekly_leaderboard_job
+    
+    # Run without force -> should be skipped
+    await run_weekly_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai")
+    leaderboard_service.get_leaderboard.assert_not_called()
+    bot.send_message.assert_not_called()
+    
+    # Run with force -> should run
+    leaderboard_service.get_leaderboard.return_value = LeaderboardResult(
+        book_entries=[],
+        user_entries=[],
+        total_sessions=0,
+    )
+    await run_weekly_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai", force=True)
+    leaderboard_service.get_leaderboard.assert_called_once()
+    bot.send_message.assert_called_once()
+

@@ -7,7 +7,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from absbot.abs_client import AudiobookshelfError
 from absbot.config import Settings
@@ -85,6 +86,8 @@ def _tasks_keyboard(public):
         active_enabled=public.active_retention_enabled,
         points_enabled=public.points_renewal_enabled,
         expiration_enabled=public.expiration_enforcement_enabled,
+        daily_leaderboard_enabled=public.daily_leaderboard_enabled,
+        weekly_leaderboard_enabled=public.weekly_leaderboard_enabled,
     )
 
 
@@ -607,7 +610,7 @@ async def push_daily_leaderboard(
     if not await _require_admin(callback, settings):
         return
     await callback.answer("每日榜推送中…")
-    await run_daily_leaderboard_job(leaderboard_service, service, callback.bot, settings.timezone)
+    await run_daily_leaderboard_job(leaderboard_service, service, callback.bot, settings.timezone, force=True)
     await callback.message.answer("✅ 每日收听榜已推送到主群组")
     public = await service.get_public_settings()
     await replace_panel(
@@ -629,8 +632,54 @@ async def push_weekly_leaderboard(
     if not await _require_admin(callback, settings):
         return
     await callback.answer("每周榜推送中…")
-    await run_weekly_leaderboard_job(leaderboard_service, service, callback.bot, settings.timezone)
+    await run_weekly_leaderboard_job(leaderboard_service, service, callback.bot, settings.timezone, force=True)
     await callback.message.answer("✅ 每周收听榜已推送到主群组")
+    public = await service.get_public_settings()
+    await replace_panel(
+        callback,
+        _build_tasks_panel_text(public, scheduler),
+        reply_markup=_tasks_keyboard(public),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
+
+@router.callback_query(F.data == "admin:daily_leaderboard")
+async def toggle_daily_leaderboard(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    public = await service.get_public_settings()
+    await service.set_daily_leaderboard_push(
+        enabled=not public.daily_leaderboard_enabled,
+    )
+    await callback.answer("已切换日榜定时推送")
+    public = await service.get_public_settings()
+    await replace_panel(
+        callback,
+        _build_tasks_panel_text(public, scheduler),
+        reply_markup=_tasks_keyboard(public),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
+
+@router.callback_query(F.data == "admin:weekly_leaderboard")
+async def toggle_weekly_leaderboard(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    public = await service.get_public_settings()
+    await service.set_weekly_leaderboard_push(
+        enabled=not public.weekly_leaderboard_enabled,
+    )
+    await callback.answer("已切换周榜定时推送")
     public = await service.get_public_settings()
     await replace_panel(
         callback,
@@ -843,9 +892,15 @@ async def list_all_users(
         return
     page = int(callback.data.rsplit(":", 1)[1])
     users = await service.list_users(offset=page * 10, limit=10)
-    db_count, abs_count = await service.get_user_counts()
+    db_count, abs_count, unbound_count = await service.get_user_counts_extended()
     abs_count_str = str(abs_count) if abs_count is not None else "未知"
-    text = f"👥 用户列表\n📊 Bot 数据库账号数：{db_count}\n🖥️ ABS 服务器用户数：{abs_count_str}"
+    unbound_count_str = str(unbound_count) if unbound_count is not None else "未知"
+    text = (
+        f"👥 用户列表\n"
+        f"📊 Bot 数据库已绑定账号数：{db_count}\n"
+        f"🖥️ ABS 服务器总用户数：{abs_count_str}\n"
+        f"🔗 未绑定 Bot 的 ABS 账号数：{unbound_count_str}"
+    )
     await callback.answer()
     await replace_panel(
         callback,
@@ -870,6 +925,79 @@ async def list_white_users(
         reply_markup=users_page_keyboard(users, page=page, kind="white"),
         panel_photo_path=await _panel_photo_path(service),
     )
+
+
+@router.callback_query(F.data.startswith("admin:clear_confirm:"))
+async def clear_confirm_handler(
+    callback: CallbackQuery, settings: Settings
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    action = callback.data.split(":")[-1]
+
+    if action == "bot_users":
+        text = (
+            "⚠️ 警告：您正在准备执行【删除bot所有用户】操作！\n\n"
+            "此操作将删除所有绑定了 Bot 的 ABS 服务器用户账号，并彻底删除这些用户在 Bot 数据库中的所有关联记录。\n"
+            "此操作不可逆，请确认是否继续？"
+        )
+    elif action == "unbound_abs":
+        text = (
+            "⚠️ 警告：您正在准备执行【删除未绑定bot的用户】操作！\n\n"
+            "此操作将扫描并删除 ABS 服务器上所有未与 Telegram 账号关联的独立账号（已自动排除 root 管理员）。\n"
+            "此操作不可逆，请确认是否继续？"
+        )
+    elif action == "all_users":
+        text = (
+            "⚠️ 警告：您正在准备执行【清空所有用户】操作！\n\n"
+            "此操作将删除 ABS 服务器上的所有普通用户账号（已排除 root 管理员），"
+            "并清空 Bot 数据库中的所有用户记录及相关数据。\n"
+            "此操作不可逆，且后果极其严重，请确认是否继续？"
+        )
+    else:
+        await callback.answer("未知操作", show_alert=True)
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ 确认清除", callback_data=f"admin:clear_do:{action}"),
+        InlineKeyboardButton(text="❌ 取消", callback_data="admin:users:0"),
+    )
+
+    await callback.answer()
+    await replace_panel(
+        callback,
+        text,
+        reply_markup=builder.as_markup(),
+        panel_photo_path=None,
+    )
+
+
+@router.callback_query(F.data.startswith("admin:clear_do:"))
+async def clear_do_handler(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    action = callback.data.split(":")[-1]
+
+    await callback.answer("正在执行清除，请稍候...", show_alert=False)
+
+    if action == "bot_users":
+        count = await service.delete_all_bot_users()
+        await callback.message.answer(f"✅ 【删除bot所有用户】完成，共删除 {count} 个用户。")
+    elif action == "unbound_abs":
+        count = await service.delete_unbound_abs_users()
+        await callback.message.answer(f"✅ 【删除未绑定bot的用户】完成，共删除 {count} 个 ABS 账号。")
+    elif action == "all_users":
+        deleted_abs, deleted_db = await service.clear_all_users()
+        await callback.message.answer(f"✅ 【清空所有用户】完成，共删除 {deleted_abs} 个 ABS 账号，清除 {deleted_db} 条数据库记录。")
+    else:
+        await callback.answer("未知操作", show_alert=True)
+        return
+
+    callback.data = "admin:users:0"
+    await list_all_users(callback, service, settings)
 
 
 @router.callback_query(F.data.startswith("admin:user:"))

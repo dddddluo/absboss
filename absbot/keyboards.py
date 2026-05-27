@@ -77,6 +77,8 @@ def tasks_panel_keyboard(
     active_enabled: bool,
     points_enabled: bool,
     expiration_enabled: bool,
+    daily_leaderboard_enabled: bool,
+    weekly_leaderboard_enabled: bool,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -101,7 +103,17 @@ def tasks_panel_keyboard(
         InlineKeyboardButton(text="⏰ 执行到期检查", callback_data="admin:confirm_run:expiration"),
     )
     builder.row(
+        InlineKeyboardButton(
+            text=f"📊 每日榜推送：{'开' if daily_leaderboard_enabled else '关'}",
+            callback_data="admin:daily_leaderboard",
+        ),
         InlineKeyboardButton(text="📊 发布每日榜", callback_data="admin:push_leaderboard:daily"),
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📊 每周榜推送：{'开' if weekly_leaderboard_enabled else '关'}",
+            callback_data="admin:weekly_leaderboard",
+        ),
         InlineKeyboardButton(text="📊 发布每周榜", callback_data="admin:push_leaderboard:weekly"),
     )
     builder.row(InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:home"))
@@ -236,6 +248,24 @@ def users_page_keyboard(users: list[TgUser], *, page: int, kind: str) -> InlineK
         nav.append(InlineKeyboardButton(text="➡️ 下一页", callback_data=f"admin:{kind}:{page + 1}"))
     if nav:
         builder.row(*nav)
+
+    if kind == "users":
+        builder.row(
+            InlineKeyboardButton(
+                text="🗑️ 删除bot所有用户", callback_data="admin:clear_confirm:bot_users"
+            ),
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="🗑️ 删除未绑定bot的用户", callback_data="admin:clear_confirm:unbound_abs"
+            ),
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="💣 清空所有用户", callback_data="admin:clear_confirm:all_users"
+            ),
+        )
+
     builder.row(InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:home"))
     return builder.as_markup()
 

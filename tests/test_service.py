@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import asyncio
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from absbot.abs_client import AudiobookshelfError
 from absbot.models import (
@@ -2172,3 +2172,160 @@ async def test_get_user_counts(session_factory, abs_client):
     db_count, abs_count = await service.get_user_counts()
     assert db_count == 1
     assert abs_count is None
+
+
+async def test_get_user_counts_extended(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    # 1. 初始状态
+    db_count, abs_count, unbound_count = await service.get_user_counts_extended()
+    assert db_count == 0
+    assert abs_count == 0
+    assert unbound_count == 0
+
+    # 2. 插入用户数据
+    async with session_factory() as session:
+        async with session.begin():
+            # 绑定了 bot
+            session.add(TgUser(telegram_id=111, abs_user_id="usr_111", abs_username="user1"))
+            # 未绑定 bot，但在数据库有记录 (abs_user_id is None)
+            session.add(TgUser(telegram_id=222, abs_user_id=None, abs_username=None))
+
+    # ABS 上有：绑定了bot的用户，未绑定的独立用户，以及 root 管理员
+    abs_client.users["usr_111"] = {"id": "usr_111", "username": "user1", "type": "user"}
+    abs_client.users["usr_222"] = {"id": "usr_222", "username": "user2", "type": "user"} # 未绑定
+    abs_client.users["usr_root"] = {"id": "usr_root", "username": "admin", "type": "root"} # root
+
+    db_count, abs_count, unbound_count = await service.get_user_counts_extended()
+    assert db_count == 1
+    assert abs_count == 3
+    assert unbound_count == 1
+
+
+async def test_delete_all_bot_users(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    async with session_factory() as session:
+        async with session.begin():
+            # 绑定了 bot 1 (普通用户)
+            session.add(TgUser(telegram_id=111, abs_user_id="usr_111", abs_username="user1"))
+            # 绑定了 bot 2 (假装这个是 root 用户)
+            session.add(TgUser(telegram_id=222, abs_user_id="usr_root", abs_username="admin"))
+            # 未绑定 bot 的 TgUser
+            session.add(TgUser(telegram_id=333, abs_user_id=None, abs_username=None))
+
+    abs_client.users["usr_111"] = {"id": "usr_111", "username": "user1", "type": "user"}
+    abs_client.users["usr_root"] = {"id": "usr_root", "username": "admin", "type": "root"}
+
+    # 动态支持删除
+    async def custom_delete_user(abs_user_id: str):
+        abs_client.deleted.append(abs_user_id)
+        abs_client.users.pop(abs_user_id, None)
+    abs_client.delete_user = custom_delete_user
+
+    deleted_count = await service.delete_all_bot_users()
+    
+    assert deleted_count == 1
+    assert "usr_111" in abs_client.deleted
+    assert "usr_root" not in abs_client.deleted
+
+    # 检查数据库中 usr_111 被清除了，而 usr_root (tg_id 222) 和未绑定用户 (tg_id 333) 还留着
+    async with session_factory() as session:
+        user_111 = await session.scalar(select(TgUser).where(TgUser.telegram_id == 111))
+        user_222 = await session.scalar(select(TgUser).where(TgUser.telegram_id == 222))
+        user_333 = await session.scalar(select(TgUser).where(TgUser.telegram_id == 333))
+    assert user_111 is None
+    assert user_222 is not None
+    assert user_333 is not None
+
+
+async def test_delete_unbound_abs_users(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    async with session_factory() as session:
+        async with session.begin():
+            # 绑定了 bot 的用户
+            session.add(TgUser(telegram_id=111, abs_user_id="usr_111", abs_username="user1"))
+
+    abs_client.users["usr_111"] = {"id": "usr_111", "username": "user1", "type": "user"}
+    abs_client.users["usr_222"] = {"id": "usr_222", "username": "user2", "type": "user"} # 未绑定
+    abs_client.users["usr_root"] = {"id": "usr_root", "username": "admin", "type": "root"} # root
+
+    # 动态支持删除
+    async def custom_delete_user(abs_user_id: str):
+        abs_client.deleted.append(abs_user_id)
+        abs_client.users.pop(abs_user_id, None)
+    abs_client.delete_user = custom_delete_user
+
+    deleted_count = await service.delete_unbound_abs_users()
+    
+    # 只有 usr_222 应该被删除，usr_root 排除，usr_111 排除
+    assert deleted_count == 1
+    assert "usr_222" in abs_client.deleted
+    assert "usr_111" not in abs_client.deleted
+    assert "usr_root" not in abs_client.deleted
+
+
+async def test_clear_all_users(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    async with session_factory() as session:
+        async with session.begin():
+            # 绑定了 bot 的用户
+            session.add(TgUser(telegram_id=111, abs_user_id="usr_111", abs_username="user1"))
+            # 未绑定 bot 的 TgUser 记录
+            session.add(TgUser(telegram_id=222, abs_user_id=None, abs_username=None))
+
+    abs_client.users["usr_111"] = {"id": "usr_111", "username": "user1", "type": "user"}
+    abs_client.users["usr_222"] = {"id": "usr_222", "username": "user2", "type": "user"} # 独立的，未绑定
+    abs_client.users["usr_root"] = {"id": "usr_root", "username": "admin", "type": "root"} # root
+
+    # 动态支持删除
+    async def custom_delete_user(abs_user_id: str):
+        abs_client.deleted.append(abs_user_id)
+        abs_client.users.pop(abs_user_id, None)
+    abs_client.delete_user = custom_delete_user
+
+    deleted_abs, deleted_db = await service.clear_all_users()
+    
+    # 应删除 usr_111, usr_222。排除 usr_root。
+    assert deleted_abs == 2
+    assert "usr_111" in abs_client.deleted
+    assert "usr_222" in abs_client.deleted
+    assert "usr_root" not in abs_client.deleted
+
+    # 数据库记录应该被全部清空
+    assert deleted_db == 2
+    async with session_factory() as session:
+        db_count = await session.scalar(select(func.count()).select_from(TgUser))
+    assert db_count == 0
+
+
+async def test_leaderboard_push_settings(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    # Check defaults
+    public = await service.get_public_settings()
+    assert public.daily_leaderboard_enabled is True
+    assert public.weekly_leaderboard_enabled is True
+
+    # Toggle daily setting
+    updated = await service.set_daily_leaderboard_push(enabled=False)
+    assert updated.daily_leaderboard_enabled is False
+    assert updated.weekly_leaderboard_enabled is True
+
+    # Toggle weekly setting
+    updated = await service.set_weekly_leaderboard_push(enabled=False)
+    assert updated.daily_leaderboard_enabled is False
+    assert updated.weekly_leaderboard_enabled is False
+
+    # Retrieve from DB and verify
+    public2 = await service.get_public_settings()
+    assert public2.daily_leaderboard_enabled is False
+    assert public2.weekly_leaderboard_enabled is False
+
+    # Turn daily back on
+    updated = await service.set_daily_leaderboard_push(enabled=True)
+    assert updated.daily_leaderboard_enabled is True
+    assert updated.weekly_leaderboard_enabled is False
+

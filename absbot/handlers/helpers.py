@@ -529,11 +529,16 @@ def _build_tasks_panel_text(public: PublicSettings, scheduler: AsyncIOScheduler)
         "任务控制面板\n\n"
         f"🕒 活跃续期：{'开' if public.active_retention_enabled else '关'}"
         f"（每日 03:00，下次：{fmt_next('daily-active-renewal')}）\n"
-        f"   窗口 {public.active_retention_window_days} 天，续期 {public.active_retention_extension_days} 天\n\n"
+        f"    窗口 {public.active_retention_window_days} 天，续期 {public.active_retention_extension_days} 天\n\n"
         f"💎 积分续期：{'开' if public.points_renewal_enabled else '关'}"
-        f"（每日 04:00，下次：{fmt_next('daily-points-renewal')}）\n\n"
+        f"（每日 04:00，下次：{fmt_next('daily-points-renewal')}）\n"
+        f"    每{public.points_renewal_cost_points}积分，续期{public.points_renewal_extension_days}天\n\n"
         f"⏰ 到期检查：{'开' if public.expiration_enforcement_enabled else '关'}"
-        f"（每日 04:10，下次：{fmt_next('daily-expiration-enforcement')}）"
+        f"（每日 05:00，下次：{fmt_next('daily-expiration-enforcement')}）\n\n"
+        f"📊 每日榜推送：{'开' if public.daily_leaderboard_enabled else '关'}"
+        f"（每日 20:00，下次：{fmt_next('daily-leaderboard-push')}）\n\n"
+        f"📊 每周榜推送：{'开' if public.weekly_leaderboard_enabled else '关'}"
+        f"（每周一 20:00，下次：{fmt_next('weekly-leaderboard-push')}）\n\n"
     )
 
 

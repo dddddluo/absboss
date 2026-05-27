@@ -21,6 +21,7 @@ from absbot.models import (
     RegistrationQueue,
     RegistrationQueueStatus,
     TgUser,
+    ListeningSession,
 )
 from absbot.security import generate_code, generate_password, normalize_code
 from absbot.timeutils import ensure_utc, format_dt, from_millis, max_datetime, utc_now
@@ -66,6 +67,9 @@ class PublicSettings:
     expiration_enforcement_enabled: bool  # 是否启用到期检查
     points_unban_enabled: bool  # 是否启用积分解禁
     points_unban_cost_points: int  # 积分解禁扣除的积分
+    daily_leaderboard_enabled: bool  # 是否启用日榜自动发布
+    weekly_leaderboard_enabled: bool  # 是否启用周榜自动发布
+
 
 
 @dataclass(frozen=True)
@@ -211,6 +215,8 @@ DEFAULT_PUBLIC_SETTINGS = {
     "expiration_enforcement_enabled": "true",
     "points_unban_enabled": "false",
     "points_unban_cost_points": "100",
+    "daily_leaderboard_enabled": "true",
+    "weekly_leaderboard_enabled": "true",
 }
 
 DEFAULT_SYSTEM_SETTINGS = {
@@ -417,6 +423,21 @@ class MembershipService:
                 values = await self._settings_map(session)
         return self._public_settings(values)
 
+    async def set_daily_leaderboard_push(self, *, enabled: bool) -> PublicSettings:
+        async with self.session_factory() as session:
+            async with session.begin():
+                await self._set_setting(session, "daily_leaderboard_enabled", _bool_text(enabled))
+                values = await self._settings_map(session)
+        return self._public_settings(values)
+
+    async def set_weekly_leaderboard_push(self, *, enabled: bool) -> PublicSettings:
+        async with self.session_factory() as session:
+            async with session.begin():
+                await self._set_setting(session, "weekly_leaderboard_enabled", _bool_text(enabled))
+                values = await self._settings_map(session)
+        return self._public_settings(values)
+
+
     async def self_unban_by_points(self, telegram_id: int) -> None:
         async with self.session_factory() as session:
             async with session.begin():
@@ -464,6 +485,32 @@ class MembershipService:
             abs_count = None
 
         return db_count, abs_count
+
+    async def get_user_counts_extended(self) -> tuple[int, int | None, int | None]:
+        """返回 (bot数据库已绑定账号数, abs服务器总用户数, 未绑定bot的abs用户数)"""
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(TgUser).where(TgUser.abs_user_id.is_not(None))
+            db_count = int(await session.scalar(stmt) or 0)
+
+            # 获取所有已绑定的 ABS 用户 ID
+            stmt_all_bound = select(TgUser.abs_user_id).where(TgUser.abs_user_id.is_not(None))
+            bound_ids = set((await session.scalars(stmt_all_bound)).all())
+
+        try:
+            abs_users = await self.abs_client.list_users()
+            abs_count = len(abs_users)
+            # 计算未绑定并且不是 root 的 ABS 用户数
+            unbound_count = sum(
+                1 for u in abs_users
+                if u.get("type") != "root" and str(u.get("id")) not in bound_ids
+            )
+        except Exception as e:
+            logger.warning("获取 ABS 用户数及未绑定用户数失败: %s", e)
+            abs_count = None
+            unbound_count = None
+
+        return db_count, abs_count, unbound_count
+
 
     async def grant_registration(
         self,
@@ -1369,6 +1416,113 @@ class MembershipService:
         logger.info("退群清理：已删除用户 tg=%s 的账号和全部记录", telegram_id)
         return True
 
+    async def delete_all_bot_users(self) -> int:
+        """删除所有绑定了 Bot 的 ABS 账号，并清除其在数据库中的记录。
+
+        已过滤并保护 type == 'root' 的用户。
+        返回删除成功的数量。
+        """
+        async with self.session_factory() as session:
+            async with session.begin():
+                stmt = select(TgUser).where(TgUser.abs_user_id.is_not(None))
+                users = (await session.scalars(stmt)).all()
+                count = 0
+                for user in users:
+                    if user.abs_user_id:
+                        try:
+                            # 提前拉取 ABS 用户信息，检查其 type
+                            try:
+                                abs_user = await self.abs_client.get_user(user.abs_user_id)
+                                is_root = abs_user.get("type") == "root"
+                            except AudiobookshelfNotFoundError:
+                                is_root = False
+                            
+                            if is_root:
+                                logger.info("批量删除：跳过保护 root 管理员账号 abs=%s", user.abs_user_id)
+                                continue
+                            
+                            await self._delete_abs_user(session, user)
+                        except Exception as e:
+                            logger.warning(
+                                "批量删除：删除 ABS 用户失败 tg=%s abs=%s: %s，继续删除本地记录",
+                                user.telegram_id,
+                                user.abs_user_id,
+                                e,
+                            )
+                    await session.execute(
+                        delete(RedeemCodeUse).where(RedeemCodeUse.telegram_id == user.telegram_id)
+                    )
+                    await session.execute(
+                        delete(RebindRequest).where(RebindRequest.requester_telegram_id == user.telegram_id)
+                    )
+                    await session.execute(
+                        delete(RegistrationQueue).where(RegistrationQueue.telegram_id == user.telegram_id)
+                    )
+                    await session.delete(user)
+                    count += 1
+                return count
+
+    async def delete_unbound_abs_users(self) -> int:
+        """删除 ABS 服务器上所有未在数据库中关联 Telegram 账户的独立账号。
+
+        已自动过滤 type == 'root' 的主管理员账号。
+        返回删除成功的数量。
+        """
+        async with self.session_factory() as session:
+            stmt = select(TgUser.abs_user_id).where(TgUser.abs_user_id.is_not(None))
+            bound_ids = set((await session.scalars(stmt)).all())
+
+        abs_users = await self.abs_client.list_users()
+        unbound_users = [
+            u for u in abs_users
+            if u.get("type") != "root" and str(u.get("id")) not in bound_ids
+        ]
+
+        count = 0
+        for u in unbound_users:
+            abs_user_id = u.get("id")
+            if abs_user_id:
+                try:
+                    await self.abs_client.delete_user(abs_user_id)
+                    count += 1
+                except Exception as e:
+                    logger.warning("批量删除：删除未绑定 ABS 用户 %s 失败: %s", abs_user_id, e)
+        return count
+
+    async def clear_all_users(self) -> tuple[int, int]:
+        """删除 ABS 服务器上的所有普通用户账号（已排除 root 管理员），
+        并清空 Bot 数据库中的所有 Telegram 用户记录。
+
+        返回 (deleted_abs_count, deleted_db_count)。
+        """
+        try:
+            abs_users = await self.abs_client.list_users()
+            deleted_abs_count = 0
+            for u in abs_users:
+                if u.get("type") != "root":
+                    abs_user_id = u.get("id")
+                    if abs_user_id:
+                        try:
+                            await self.abs_client.delete_user(abs_user_id)
+                            deleted_abs_count += 1
+                        except Exception as e:
+                            logger.warning("清空所有用户：删除 ABS 用户 %s 失败: %s", abs_user_id, e)
+        except Exception as e:
+            logger.warning("清空所有用户：获取 ABS 用户列表失败: %s", e)
+            deleted_abs_count = 0
+
+        async with self.session_factory() as session:
+            async with session.begin():
+                db_users_count = await session.scalar(select(func.count()).select_from(TgUser)) or 0
+                await session.execute(delete(RedeemCodeUse))
+                await session.execute(delete(RebindRequest))
+                await session.execute(delete(RegistrationQueue))
+                await session.execute(delete(ListeningSession))
+                await session.execute(delete(TgUser))
+                
+        return deleted_abs_count, int(db_users_count)
+
+
     async def update_display_name(self, telegram_id: int, display_name: str) -> None:
         """Passively update tg_display_name for a user. Silently no-ops if user not found."""
         async with self.session_factory() as session:
@@ -1807,6 +1961,8 @@ class MembershipService:
             expiration_enforcement_enabled=_as_bool(values["expiration_enforcement_enabled"]),
             points_unban_enabled=_as_bool(values["points_unban_enabled"]),
             points_unban_cost_points=int(values["points_unban_cost_points"]),
+            daily_leaderboard_enabled=_as_bool(values["daily_leaderboard_enabled"]),
+            weekly_leaderboard_enabled=_as_bool(values["weekly_leaderboard_enabled"]),
         )
 
     def _system_settings(self, values: dict[str, str]) -> SystemSettings:

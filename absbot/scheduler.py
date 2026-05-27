@@ -70,7 +70,7 @@ def create_scheduler(
     )
     scheduler.add_job(
         run_expiration_enforcement_job,
-        CronTrigger(hour=4, minute=10, timezone=timezone),
+        CronTrigger(hour=5, minute=0, timezone=timezone),
         args=[service, bot],
         id="daily-expiration-enforcement",
         replace_existing=True,
@@ -78,7 +78,7 @@ def create_scheduler(
     )
     scheduler.add_job(
         run_backup_job,
-        CronTrigger(hour=5, minute=0, timezone=timezone),
+        CronTrigger(hour=6, minute=0, timezone=timezone),
         args=[engine, bot, settings],
         id="daily-backup",
         replace_existing=True,
@@ -135,8 +135,14 @@ async def run_daily_leaderboard_job(
     service: MembershipService,
     bot: Bot,
     tz_name: str,
+    *,
+    force: bool = False,
 ) -> None:
     """20:00 daily — push previous-24h leaderboard to main group."""
+    public = await service.get_public_settings()
+    if not force and not public.daily_leaderboard_enabled:
+        logger.info("每日榜推送未开启，跳过定时任务")
+        return
     system = await service.get_system_settings()
     if system.main_group_chat_id is None:
         return
@@ -155,8 +161,14 @@ async def run_weekly_leaderboard_job(
     service: MembershipService,
     bot: Bot,
     tz_name: str,
+    *,
+    force: bool = False,
 ) -> None:
     """Monday 20:00 — push previous-7-day leaderboard to main group."""
+    public = await service.get_public_settings()
+    if not force and not public.weekly_leaderboard_enabled:
+        logger.info("每周榜推送未开启，跳过定时任务")
+        return
     system = await service.get_system_settings()
     if system.main_group_chat_id is None:
         return
@@ -169,6 +181,7 @@ async def run_weekly_leaderboard_job(
     result = await leaderboard_service.get_leaderboard(start, end)
     text = format_leaderboard_message("weekly", period_label, result)
     await safe_send_message(bot, system.main_group_chat_id, text)
+
 
 
 async def run_points_renewal_job(
