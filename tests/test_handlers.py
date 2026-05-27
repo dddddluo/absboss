@@ -632,7 +632,7 @@ def test_start_keyboard_for_user_without_account_hides_account_actions():
     )
     texts = _button_texts(keyboard)
 
-    assert "👤 个人信息" in texts
+    assert "👤 个人信息" not in texts
     assert "🆕 创建账号" in texts
     assert "🔗 绑定旧账" in texts
     assert "🔄 申请换绑" in texts

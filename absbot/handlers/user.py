@@ -75,8 +75,7 @@ async def start_entry(
         owner_configured=settings.owner_tg_id is not None,
     ):
         await message.answer(
-            "👋 欢迎使用 AudiobookshelfBot！\n\n"
-            "Bot 尚未初始化，请使用 /setup 指令完成初始化配置。"
+            "👋 欢迎使用 AudiobookshelfBot！\n\nBot 尚未初始化，请使用 /setup 指令完成初始化配置。"
         )
         return
     if _start_payload(message) == "register":
@@ -204,7 +203,9 @@ async def user_actions(
             return
         await state.set_state(UserStates.bind_credentials)
         await callback.answer()
-        await _edit_prompt_message(callback.message, "请输入 Audiobookshelf 用户名和密码，格式：用户名 密码。")
+        await _edit_prompt_message(
+            callback.message, "请输入 Audiobookshelf 用户名和密码，格式：用户名 密码。"
+        )
         return
     if action == "rebind":
         if not _is_private_chat(callback.message):
@@ -216,7 +217,9 @@ async def user_actions(
             return
         await state.set_state(UserStates.rebind_credentials)
         await callback.answer()
-        await _edit_prompt_message(callback.message, "请输入要换绑的 Audiobookshelf 用户名和密码，格式：用户名 密码。")
+        await _edit_prompt_message(
+            callback.message, "请输入要换绑的 Audiobookshelf 用户名和密码，格式：用户名 密码。"
+        )
         return
     if action == "redeem":
         await state.set_state(UserStates.redeem_code)
@@ -284,7 +287,11 @@ async def user_actions(
             await _replace_user_panel(callback, service, settings, telegram_id)
             return
         await callback.answer()
-        await _edit_prompt_message(callback.message, "确认删除你的 Audiobookshelf 账号？", reply_markup=confirm_delete_keyboard())
+        await _edit_prompt_message(
+            callback.message,
+            "确认注销你的 Audiobookshelf 账号？",
+            reply_markup=confirm_delete_keyboard(),
+        )
         return
     if action == "delete_confirm":
         try:
@@ -301,7 +308,9 @@ async def user_actions(
 
 
 @router.message(UserStates.create_username)
-async def user_create_account(message: Message, state: FSMContext, service: MembershipService) -> None:
+async def user_create_account(
+    message: Message, state: FSMContext, service: MembershipService
+) -> None:
     if message.from_user is None:
         return
     username = message.text or ""
@@ -322,7 +331,9 @@ async def user_create_account(message: Message, state: FSMContext, service: Memb
         await message.answer(str(exc))
         return
     await state.clear()
-    await message.answer(f"✅ 已成功加入注册队列，当前排在第 {position} 位，账号创建完成后将通知您。")
+    await message.answer(
+        f"✅ 已成功加入注册队列，当前排在第 {position} 位，账号创建完成后将通知您。"
+    )
 
 
 @router.message(UserStates.bind_credentials)

@@ -131,10 +131,11 @@ def user_panel_keyboard(
     include_close: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    info_buttons = [InlineKeyboardButton(text="👤 个人信息", callback_data="me:info")]
+    info_buttons = []
     if profile.abs_user_id:
         info_buttons.append(InlineKeyboardButton(text="📡 查看线路", callback_data="me:lines"))
-    builder.row(*info_buttons)
+    if info_buttons:
+        builder.row(*info_buttons)
     if profile.abs_user_id:
         builder.row(InlineKeyboardButton(text="🎟️ 兑换码", callback_data="me:redeem"))
     else:
