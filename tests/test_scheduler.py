@@ -213,11 +213,18 @@ async def test_notify_expiration_enforcement_result_empty_result_sends_nothing()
 
 
 async def test_notify_active_renewal_result_sends_group_summary():
+    from absbot.timeutils import format_dt
     bot = FakeBot()
+    expires = datetime(2026, 6, 20, 3, 0, tzinfo=timezone.utc)
     result = ActivityCheckResult(
         total_synced=5,
         active_renewed=[
-            ActivityUserResult(telegram_id=1, abs_user_id="abs-1", abs_username="active")
+            ActivityUserResult(
+                telegram_id=1,
+                abs_user_id="abs-1",
+                abs_username="active",
+                expires_at=expires,
+            )
         ],
         disabled=[
             ActivityUserResult(
@@ -240,13 +247,18 @@ async def test_notify_active_renewal_result_sends_group_summary():
 
     await notify_active_renewal_result(bot, _system(), result)
 
-    assert len(bot.sent_messages) == 1
+    assert len(bot.sent_messages) == 2
     assert bot.sent_messages[0][0] == -100123
     assert "活跃续期完成" in bot.sent_messages[0][1]
     assert "共检测 5 位用户" in bot.sent_messages[0][1]
     assert "活跃续期：1" in bot.sent_messages[0][1]
     assert "已禁用" not in bot.sent_messages[0][1]
     assert "已删除" not in bot.sent_messages[0][1]
+
+    assert bot.sent_messages[1][0] == 1
+    assert "活跃续期成功" in bot.sent_messages[1][1]
+    assert "你的 Audiobookshelf 账号 active 已检测到活跃并自动续期成功。" in bot.sent_messages[1][1]
+    assert f"有效期已延长至：{format_dt(expires)}" in bot.sent_messages[1][1]
 
 
 async def test_notify_registration_result_sends_success_message():

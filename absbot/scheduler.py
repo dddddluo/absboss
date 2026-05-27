@@ -414,6 +414,9 @@ async def notify_active_renewal_result(
             _active_renewal_group_summary(result),
         )
 
+    for user in result.active_renewed:
+        await safe_send_message(bot, user.telegram_id, _active_renewed_user_text(user))
+
 
 async def safe_send_message(
     bot: Bot,
@@ -523,6 +526,17 @@ def _active_renewal_group_summary(result: ActivityCheckResult) -> str:
             html.escape(u.abs_username or u.abs_user_id) for u in result.active_renewed
         )
         lines.append(f"续期用户：{names}")
+    return "\n".join(lines)
+
+
+def _active_renewed_user_text(user: ActivityUserResult) -> str:
+    account = html.escape(user.abs_username or user.abs_user_id)
+    lines = [
+        "<b>活跃续期成功</b>",
+        f"你的 Audiobookshelf 账号 {account} 已检测到活跃并自动续期成功。",
+    ]
+    if user.expires_at:
+        lines.append(f"有效期已延长至：{format_dt(user.expires_at)}")
     return "\n".join(lines)
 
 

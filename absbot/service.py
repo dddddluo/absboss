@@ -157,6 +157,7 @@ class ActivityUserResult:
     telegram_id: int
     abs_user_id: str
     abs_username: str | None
+    expires_at: datetime | None = None
     disabled_at: datetime | None = None
     deleted_at: datetime | None = None
 
