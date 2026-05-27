@@ -160,7 +160,9 @@ async def test_process_next_registration_success_marks_done(session_factory, abs
     assert result.username == "alice"
     assert result.initial_password
     async with session_factory() as session:
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 94001))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 94001)
+        )
         user = await session.scalar(select(TgUser).where(TgUser.telegram_id == 94001))
     assert result.queue_id == item.id
     assert item.status == RegistrationQueueStatus.DONE
@@ -216,7 +218,9 @@ async def test_process_next_registration_failure_marks_failed(session_factory, a
     assert result.success is False
     assert result.error_message == "当前没有可用注册资格"
     async with session_factory() as session:
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 94002))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 94002)
+        )
     assert result.queue_id == item.id
     assert item.status == RegistrationQueueStatus.FAILED
     assert item.notification_delivered is False
@@ -281,9 +285,7 @@ async def test_mark_registration_queue_notified_hides_result_from_notification_r
     assert retry is None
 
 
-async def test_process_next_registration_serializes_concurrent_calls(
-    session_factory, abs_client
-):
+async def test_process_next_registration_serializes_concurrent_calls(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     await service.set_registration(opened=True, slots=1)
     await service.enqueue_registration(telegram_id=94003, abs_username="alice")
@@ -360,7 +362,9 @@ async def test_reset_stuck_queue_items_returns_processing_to_pending(session_fac
     count = await service.reset_stuck_queue_items()
 
     async with session_factory() as session:
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95001))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95001)
+        )
     assert count == 1
     assert item.status == RegistrationQueueStatus.PENDING
 
@@ -394,7 +398,9 @@ async def test_process_next_registration_recovers_previously_created_account_aft
     result = await service.process_next_registration()
 
     async with session_factory() as session:
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95002))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95002)
+        )
     assert result is not None
     assert result.success is True
     assert result.username == "alice"
@@ -437,7 +443,9 @@ async def test_process_next_registration_recovers_reserved_slot_after_reset(
 
     async with session_factory() as session:
         user = await session.scalar(select(TgUser).where(TgUser.telegram_id == 95003))
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95003))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95003)
+        )
     assert result is not None
     assert result.success is True
     assert result.initial_password == "reserved-secret"
@@ -483,7 +491,9 @@ async def test_process_next_registration_relinks_reserved_abs_user_created_befor
 
     async with session_factory() as session:
         user = await session.scalar(select(TgUser).where(TgUser.telegram_id == 95004))
-        item = await session.scalar(select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95004))
+        item = await session.scalar(
+            select(RegistrationQueue).where(RegistrationQueue.telegram_id == 95004)
+        )
     assert result is not None
     assert result.success is True
     assert result.initial_password == "reserved-secret"
@@ -787,10 +797,15 @@ async def test_set_whitelist_restores_disabled_account_and_clears_disabled_at(
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=3201, credits=1, days=1, now=now - timedelta(days=2))
-    created = await service.create_account_from_registration(telegram_id=3201, username="restored", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=3201, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=3201, username="restored", now=now - timedelta(days=31)
+    )
 
-    await service.process_expirations(now=now)
+    await service.process_points_renewals(now=now)
+    await service.process_expiration_enforcement(now=now)
     disabled_profile = await service.get_profile(3201)
 
     assert disabled_profile.is_disabled is True
@@ -814,10 +829,15 @@ async def test_grant_registration_days_restores_disabled_account_and_clears_disa
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=3202, credits=1, days=1, now=now - timedelta(days=2))
-    created = await service.create_account_from_registration(telegram_id=3202, username="renewed", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=3202, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=3202, username="renewed", now=now - timedelta(days=31)
+    )
 
-    await service.process_expirations(now=now)
+    await service.process_points_renewals(now=now)
+    await service.process_expiration_enforcement(now=now)
     disabled_profile = await service.get_profile(3202)
 
     assert disabled_profile.is_disabled is True
@@ -850,7 +870,9 @@ async def test_admin_adjust_expiry_extends_existing_expiration(session_factory, 
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.grant_registration(telegram_id=3301, credits=1, days=30, now=now)
-    await service.create_account_from_registration(telegram_id=3301, username="expiry", now=now - timedelta(days=20))
+    await service.create_account_from_registration(
+        telegram_id=3301, username="expiry", now=now - timedelta(days=20)
+    )
 
     updated = await service.admin_adjust_expiry(3301, delta=5, now=now)
     profile = await service.get_profile(3301)
@@ -880,9 +902,14 @@ async def test_admin_adjust_expiry_restores_disabled_future_account(session_fact
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=3303, credits=1, days=30, now=now - timedelta(days=2))
-    created = await service.create_account_from_registration(telegram_id=3303, username="disabled", now=now - timedelta(days=31))
-    await service.process_expirations(now=now)
+    await service.grant_registration(
+        telegram_id=3303, credits=1, days=30, now=now - timedelta(days=2)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=3303, username="disabled", now=now - timedelta(days=31)
+    )
+    await service.process_points_renewals(now=now)
+    await service.process_expiration_enforcement(now=now)
 
     updated = await service.admin_adjust_expiry(3303, delta=30, now=now)
 
@@ -944,11 +971,18 @@ async def test_expiration_prefers_active_retention_over_points(session_factory, 
     await service.set_active_retention(enabled=True, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=True, cost_points=100, extension_days=30)
     await service.admin_adjust_points(telegram_id=4001, delta=100)
-    await service.grant_registration(telegram_id=4001, credits=1, days=1, now=now - timedelta(days=2))
-    created = await service.create_account_from_registration(telegram_id=4001, username="dave")
-    abs_client.users[created.abs_user_id]["lastSeen"] = int((now - timedelta(days=1)).timestamp() * 1000)
+    await service.grant_registration(
+        telegram_id=4001, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=4001, username="dave", now=now - timedelta(days=2)
+    )
+    abs_client.users[created.abs_user_id]["lastSeen"] = int(
+        (now - timedelta(days=1)).timestamp() * 1000
+    )
 
-    await service.process_expirations(now=now)
+    await service.process_active_renewals(now=now)
+    await service.process_expiration_enforcement(now=now)
     profile = await service.get_profile(4001)
 
     assert profile.points == 100
@@ -964,14 +998,23 @@ async def test_expiration_uses_points_then_disables_when_no_rule_applies(
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=True, cost_points=100, extension_days=30)
 
-    await service.grant_registration(telegram_id=5001, credits=1, days=1, now=now - timedelta(days=2))
-    await service.create_account_from_registration(telegram_id=5001, username="erin", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5001, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    await service.create_account_from_registration(
+        telegram_id=5001, username="erin", now=now - timedelta(days=31)
+    )
     await service.admin_adjust_points(telegram_id=5001, delta=100)
 
-    await service.grant_registration(telegram_id=5002, credits=1, days=1, now=now - timedelta(days=2))
-    poor = await service.create_account_from_registration(telegram_id=5002, username="frank", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5002, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    poor = await service.create_account_from_registration(
+        telegram_id=5002, username="frank", now=now - timedelta(days=31)
+    )
 
-    await service.process_expirations(now=now)
+    await service.process_points_renewals(now=now)
+    await service.process_expiration_enforcement(now=now)
     enough_profile = await service.get_profile(5001)
     poor_profile = await service.get_profile(5002)
 
@@ -1051,13 +1094,13 @@ async def test_delete_account_clears_account_expiration_and_activity(session_fac
     assert profile.last_played_at is None
 
 
-async def test_rebind_request_approval_transfers_account_and_benefits(
-    session_factory, abs_client
-):
+async def test_rebind_request_approval_transfers_account_and_benefits(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 19, 8, 0, tzinfo=UTC)
     await service.grant_registration(7001, credits=1, days=30, now=now)
-    created = await service.create_account_from_registration(7001, "alice", now=now - timedelta(days=20))
+    created = await service.create_account_from_registration(
+        7001, "alice", now=now - timedelta(days=20)
+    )
     await service.admin_adjust_points(7001, delta=88)
     await service.set_whitelist(7001, True)
     abs_client.users[created.abs_user_id]["lastSeen"] = int(
@@ -1132,28 +1175,38 @@ async def test_rebind_request_rejection_does_not_change_binding(session_factory,
     assert new_profile.abs_user_id is None
 
 
-async def test_expiration_result_tracks_points_renewal_and_disable(session_factory, abs_client):
+async def test_points_renewal_and_expiration_enforcement_are_separate(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=True, cost_points=100, extension_days=30)
 
-    await service.grant_registration(telegram_id=5101, credits=1, days=1, now=now - timedelta(days=2))
-    renewed = await service.create_account_from_registration(telegram_id=5101, username="renewed", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5101, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    renewed = await service.create_account_from_registration(
+        telegram_id=5101, username="renewed", now=now - timedelta(days=31)
+    )
     await service.admin_adjust_points(telegram_id=5101, delta=100)
 
-    await service.grant_registration(telegram_id=5102, credits=1, days=1, now=now - timedelta(days=2))
-    disabled = await service.create_account_from_registration(telegram_id=5102, username="disabled", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5102, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    disabled = await service.create_account_from_registration(
+        telegram_id=5102, username="disabled", now=now - timedelta(days=31)
+    )
 
-    result = await service.process_expirations(now=now)
+    renewal_result = await service.process_points_renewals(now=now)
+    enforcement_result = await service.process_expiration_enforcement(now=now)
     renewed_profile = await service.get_profile(5101)
     disabled_profile = await service.get_profile(5102)
 
-    assert [item.telegram_id for item in result.points_renewed] == [5101]
-    assert result.points_renewed[0].abs_username == "renewed"
-    assert result.points_renewed[0].points_spent == 100
-    assert [item.telegram_id for item in result.disabled] == [5102]
-    assert result.disabled[0].abs_username == "disabled"
+    assert [item.telegram_id for item in renewal_result.points_renewed] == [5101]
+    assert renewal_result.points_renewed[0].abs_username == "renewed"
+    assert renewal_result.points_renewed[0].points_spent == 100
+    assert renewal_result.disabled == []
+    assert [item.telegram_id for item in enforcement_result.disabled] == [5102]
+    assert enforcement_result.disabled[0].abs_username == "disabled"
     assert renewed_profile.is_disabled is False
     assert renewed_profile.disabled_at is None
     assert disabled_profile.is_disabled is True
@@ -1162,24 +1215,70 @@ async def test_expiration_result_tracks_points_renewal_and_disable(session_facto
     assert renewed.abs_user_id not in abs_client.disabled
 
 
-async def test_expiration_result_tracks_active_retention(session_factory, abs_client):
+async def test_activity_check_result_tracks_active_retention(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_active_retention(enabled=True, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=True, cost_points=100, extension_days=30)
     await service.admin_adjust_points(telegram_id=5103, delta=100)
-    await service.grant_registration(telegram_id=5103, credits=1, days=1, now=now - timedelta(days=2))
-    created = await service.create_account_from_registration(telegram_id=5103, username="active", now=now - timedelta(days=31))
-    abs_client.users[created.abs_user_id]["lastSeen"] = int((now - timedelta(days=1)).timestamp() * 1000)
+    await service.grant_registration(
+        telegram_id=5103, credits=1, days=1, now=now - timedelta(days=2)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=5103, username="active", now=now - timedelta(days=31)
+    )
+    abs_client.users[created.abs_user_id]["lastSeen"] = int(
+        (now - timedelta(days=1)).timestamp() * 1000
+    )
 
-    result = await service.process_expirations(now=now)
+    result = await service.process_active_renewals(now=now)
     profile = await service.get_profile(5103)
 
     assert [item.telegram_id for item in result.active_renewed] == [5103]
     assert result.active_renewed[0].abs_username == "active"
-    assert result.points_renewed == []
     assert profile.points == 100
     assert profile.expires_at == now + timedelta(days=30)
+
+
+async def test_active_renewal_does_not_disable_inactive_users(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+    now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
+    await service.set_active_retention(enabled=True, window_days=30, extension_days=30)
+    await service.grant_registration(telegram_id=5105, credits=1, days=30, now=now)
+    created = await service.create_account_from_registration(
+        telegram_id=5105, username="inactive", now=now
+    )
+    abs_client.users[created.abs_user_id]["lastSeen"] = int(
+        (now - timedelta(days=31)).timestamp() * 1000
+    )
+
+    result = await service.process_active_renewals(now=now)
+    profile = await service.get_profile(5105)
+
+    assert result.disabled == []
+    assert result.deleted == []
+    assert profile.is_disabled is False
+    assert abs_client.disabled == []
+
+
+async def test_activity_check_does_not_shorten_longer_expiration(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+    now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
+    longer_expiration = now + timedelta(days=365)
+    await service.set_active_retention(enabled=True, window_days=30, extension_days=30)
+    await service.grant_registration(telegram_id=5104, credits=1, days=365, now=now)
+    created = await service.create_account_from_registration(
+        telegram_id=5104, username="longactive", now=now
+    )
+    abs_client.users[created.abs_user_id]["lastSeen"] = int(
+        (now - timedelta(days=1)).timestamp() * 1000
+    )
+
+    result = await service.process_active_renewals(now=now)
+    profile = await service.get_profile(5104)
+
+    assert result.active_renewed == []
+    assert profile.expires_at == longer_expiration
 
 
 async def test_disabled_delete_after_zero_keeps_disabled_account(session_factory, abs_client):
@@ -1188,11 +1287,15 @@ async def test_disabled_delete_after_zero_keeps_disabled_account(session_factory
     await service.set_system_settings(disabled_delete_after_days=0)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=5201, credits=1, days=1, now=now - timedelta(days=5))
-    created = await service.create_account_from_registration(telegram_id=5201, username="keep", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5201, credits=1, days=1, now=now - timedelta(days=5)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=5201, username="keep", now=now - timedelta(days=31)
+    )
 
-    first = await service.process_expirations(now=now)
-    second = await service.process_expirations(now=now + timedelta(days=30))
+    first = await service.process_expiration_enforcement(now=now)
+    second = await service.process_expiration_enforcement(now=now + timedelta(days=30))
     profile = await service.get_profile(5201)
 
     assert [item.telegram_id for item in first.disabled] == [5201]
@@ -1204,17 +1307,45 @@ async def test_disabled_delete_after_zero_keeps_disabled_account(session_factory
     assert abs_client.deleted == []
 
 
+async def test_expiration_enforcement_disabled_skips_disable_and_delete(
+    session_factory, abs_client
+):
+    service = MembershipService(session_factory, abs_client)
+    now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
+    await service.set_expiration_enforcement(enabled=False)
+    await service.grant_registration(
+        telegram_id=5206, credits=1, days=1, now=now - timedelta(days=5)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=5206, username="expired", now=now - timedelta(days=31)
+    )
+
+    result = await service.process_expiration_enforcement(now=now)
+    profile = await service.get_profile(5206)
+
+    assert result.disabled == []
+    assert result.deleted == []
+    assert profile.is_disabled is False
+    assert profile.abs_user_id == created.abs_user_id
+    assert abs_client.disabled == []
+    assert abs_client.deleted == []
+
+
 async def test_disabled_delete_after_days_deletes_old_disabled_account(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_system_settings(disabled_delete_after_days=3)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=5202, credits=1, days=1, now=now - timedelta(days=5))
-    created = await service.create_account_from_registration(telegram_id=5202, username="delete", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5202, credits=1, days=1, now=now - timedelta(days=5)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=5202, username="delete", now=now - timedelta(days=31)
+    )
 
-    await service.process_expirations(now=now)
-    result = await service.process_expirations(now=now + timedelta(days=3))
+    await service.process_expiration_enforcement(now=now)
+    result = await service.process_expiration_enforcement(now=now + timedelta(days=3))
     profile = await service.get_profile(5202)
 
     assert [item.telegram_id for item in result.deleted] == [5202]
@@ -1253,7 +1384,7 @@ async def test_disabled_delete_after_days_deletes_legacy_disabled_account_with_u
                 )
             )
 
-    result = await service.process_expirations(now=now)
+    result = await service.process_expiration_enforcement(now=now)
     profile = await service.get_profile(5204)
 
     assert [item.telegram_id for item in result.deleted] == [5204]
@@ -1266,7 +1397,7 @@ async def test_disabled_delete_after_days_deletes_legacy_disabled_account_with_u
     assert abs_client.deleted == ["usr_legacy"]
 
 
-async def test_activity_check_auto_delete_clears_abs_password(session_factory, abs_client):
+async def test_expiration_enforcement_auto_delete_clears_abs_password(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 18, 8, 0, tzinfo=UTC)
     await service.set_system_settings(disabled_delete_after_days=3)
@@ -1288,7 +1419,7 @@ async def test_activity_check_auto_delete_clears_abs_password(session_factory, a
                 )
             )
 
-    result = await service.process_activity_check(now=now)
+    result = await service.process_expiration_enforcement(now=now)
     profile = await service.get_profile(5205)
 
     assert [item.telegram_id for item in result.deleted] == [5205]
@@ -1307,17 +1438,21 @@ async def test_disabled_delete_after_days_keeps_whitelisted_disabled_account(
     await service.set_system_settings(disabled_delete_after_days=3)
     await service.set_active_retention(enabled=False, window_days=30, extension_days=30)
     await service.set_points_renewal(enabled=False, cost_points=100, extension_days=30)
-    await service.grant_registration(telegram_id=5203, credits=1, days=1, now=now - timedelta(days=5))
-    created = await service.create_account_from_registration(telegram_id=5203, username="white", now=now - timedelta(days=31))
+    await service.grant_registration(
+        telegram_id=5203, credits=1, days=1, now=now - timedelta(days=5)
+    )
+    created = await service.create_account_from_registration(
+        telegram_id=5203, username="white", now=now - timedelta(days=31)
+    )
 
-    await service.process_expirations(now=now)
+    await service.process_expiration_enforcement(now=now)
     async with session_factory() as session:
         async with session.begin():
             user = await session.scalar(select(TgUser).where(TgUser.telegram_id == 5203))
             user.is_whitelisted = True
             user.disabled_at = None
             user.updated_at = now
-    result = await service.process_expirations(now=now + timedelta(days=3))
+    result = await service.process_expiration_enforcement(now=now + timedelta(days=3))
     profile = await service.get_profile(5203)
 
     assert result.deleted == []
@@ -1371,6 +1506,7 @@ async def test_self_unban_by_points_deducts_points_and_clears_disabled(session_f
 
 async def test_self_unban_by_points_raises_when_insufficient(session_factory, abs_client):
     from absbot.service import InsufficientPointsError
+
     service = MembershipService(session_factory, abs_client)
     await service.set_points_unban(enabled=True, cost_points=150)
     await service.get_profile(9002)  # ensure user exists
@@ -1411,6 +1547,7 @@ async def test_sync_users_to_abs_syncs_active_states(session_factory, abs_client
     # 在 bot DB 中禁用 bob
     async with session_factory() as sess:
         from sqlalchemy import select as sa_select
+
         bob = (await sess.execute(sa_select(TgUser).where(TgUser.telegram_id == 1002))).scalar_one()
         bob.is_disabled = True
         await sess.commit()
@@ -1506,7 +1643,7 @@ async def test_reset_password_relinks_abs_user_id_after_not_found(session_factor
     assert abs_client.reset[0][0] == "new_abs_id"
 
 
-async def test_process_expirations_relinks_abs_user_id_before_disabling(
+async def test_process_expiration_enforcement_relinks_abs_user_id_before_disabling(
     session_factory, abs_client
 ):
     service = MembershipService(session_factory, abs_client)
@@ -1545,7 +1682,7 @@ async def test_process_expirations_relinks_abs_user_id_before_disabling(
     abs_client.get_user = get_user
     abs_client.disable_user = disable_user
 
-    result = await service.process_expirations(now=now)
+    result = await service.process_expiration_enforcement(now=now)
 
     async with session_factory() as session:
         user = await session.scalar(select(TgUser).where(TgUser.telegram_id == 1007))
@@ -1575,9 +1712,11 @@ async def test_sync_users_to_abs_counts_failed_on_error(session_factory, abs_cli
 
 # ── get_total_book_count ───────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_abs_client():
     from unittest.mock import AsyncMock, MagicMock
+
     client = MagicMock()
     client.get_libraries = AsyncMock()
     client.get_library_stats = AsyncMock()
@@ -1587,6 +1726,7 @@ def mock_abs_client():
 @pytest.fixture
 def service(session_factory, mock_abs_client):
     from absbot.service import MembershipService
+
     return MembershipService(session_factory, mock_abs_client)
 
 
@@ -1596,12 +1736,14 @@ async def test_get_total_book_count_sums_all_libraries(service, mock_abs_client)
         {"id": "lib_1"},
         {"id": "lib_2"},
     ]
+
     async def get_stats(lib_id):
         if lib_id == "lib_1":
             return {"totalItems": 150}
         elif lib_id == "lib_2":
             return {"totalItems": 30}
         return {}
+
     mock_abs_client.get_library_stats.side_effect = get_stats
     count = await service.get_total_book_count()
     assert count == 180
@@ -1633,8 +1775,10 @@ async def test_get_total_book_count_handles_missing_stats(service, mock_abs_clie
         {"id": "lib_1"},
         {"id": "lib_2"},
     ]
+
     async def get_stats(lib_id):
         return {}
+
     mock_abs_client.get_library_stats.side_effect = get_stats
     count = await service.get_total_book_count()
     assert count == 0
@@ -1750,9 +1894,7 @@ async def test_create_account_uses_extend_from_when_expires_at_in_future(
     assert created.expires_at == future_expires + timedelta(days=30)
 
 
-async def test_create_account_uses_now_when_expires_at_in_past(
-    session_factory, abs_client
-):
+async def test_create_account_uses_now_when_expires_at_in_past(session_factory, abs_client):
     """If user has an expired expires_at, account creation extends from now."""
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 19, 8, 0, tzinfo=UTC)
@@ -1842,9 +1984,7 @@ async def test_transfer_account_transfers_renewal_days(session_factory, abs_clie
     assert new_profile.renewal_days is None
 
 
-async def test_transfer_account_keeps_requester_renewal_days_if_set(
-    session_factory, abs_client
-):
+async def test_transfer_account_keeps_requester_renewal_days_if_set(session_factory, abs_client):
     """If requester already has renewal_days, it should be kept over the transferred value."""
     service = MembershipService(session_factory, abs_client)
     now = datetime(2026, 5, 19, 8, 0, tzinfo=UTC)
@@ -1943,6 +2083,7 @@ async def test_redeem_renewal_code_without_account_adds_to_default_renewal_days(
 
 async def test_list_redeem_codes_usable_filter(session_factory, abs_client):
     from absbot.models import RedeemCode
+
     service = MembershipService(session_factory, abs_client)
     now = datetime.now(timezone.utc)
 
@@ -1988,7 +2129,9 @@ async def test_list_redeem_codes_usable_filter(session_factory, abs_client):
     assert len(all_codes) == 5
 
     # Verify usable list only returns the 2 usable ones
-    usable_codes = await service.list_redeem_codes(code_type=RedeemCodeType.REGISTRATION, usable=True, limit=100)
+    usable_codes = await service.list_redeem_codes(
+        code_type=RedeemCodeType.REGISTRATION, usable=True, limit=100
+    )
     assert len(usable_codes) == 2
     codes_set = {c.code for c in usable_codes}
     assert codes_set == {"USABLE1", "USABLE2"}
@@ -2023,6 +2166,7 @@ async def test_get_user_counts(session_factory, abs_client):
     # 4. Mock client error
     async def bad_list_users():
         raise RuntimeError("ABS down")
+
     abs_client.list_users = bad_list_users
 
     db_count, abs_count = await service.get_user_counts()

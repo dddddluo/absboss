@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import Select, delete, func, or_, select, update
@@ -49,30 +49,35 @@ class InsufficientPointsError(Exception):
 
 @dataclass(frozen=True)
 class PublicSettings:
-    registration_open: bool
-    registration_slots: int
-    server_lines: str
-    checkin_enabled: bool
-    checkin_min_points: int
-    checkin_max_points: int
-    active_retention_enabled: bool
-    active_retention_window_days: int
-    active_retention_extension_days: int
-    points_renewal_enabled: bool
-    points_renewal_cost_points: int
-    points_renewal_extension_days: int
-    points_unban_enabled: bool
-    points_unban_cost_points: int
+    """公开配置属性"""
+
+    registration_open: bool  # 是否开放注册
+    registration_slots: int  # 注册名额数量
+    server_lines: str  # 服务器线路信息
+    checkin_enabled: bool  # 是否开启签到
+    checkin_min_points: int  # 签到最少获得积分
+    checkin_max_points: int  # 签到最多获得积分
+    active_retention_enabled: bool  # 是否启用活跃保留
+    active_retention_window_days: int  # 活跃检测天数窗口
+    active_retention_extension_days: int  # 活跃延长天数
+    points_renewal_enabled: bool  # 是否启用积分续期
+    points_renewal_cost_points: int  # 积分续期扣除的积分
+    points_renewal_extension_days: int  # 积分续期延长的天数
+    expiration_enforcement_enabled: bool  # 是否启用到期检查
+    points_unban_enabled: bool  # 是否启用积分解禁
+    points_unban_cost_points: int  # 积分解禁扣除的积分
 
 
 @dataclass(frozen=True)
 class SystemSettings:
-    default_register_days: int
-    panel_photo_path: str | None
-    rebind_review_chat_id: int | None
-    main_group_chat_id: int | None
-    main_group_link: str | None
-    disabled_delete_after_days: int
+    """系统内部配置属性"""
+
+    default_register_days: int  # 默认注册天数
+    panel_photo_path: str | None  # 控制面板背景图路径
+    rebind_review_chat_id: int | None  # 重新绑定审核通知群组/频道 ID
+    main_group_chat_id: int | None  # 官方群组 ID
+    main_group_link: str | None  # 官方群组链接
+    disabled_delete_after_days: int  # 禁用后自动删除账号天数
 
 
 @dataclass(frozen=True)
@@ -161,6 +166,7 @@ class ActivityCheckResult:
     total_synced: int
     disabled: list[ActivityUserResult]
     deleted: list[ActivityUserResult]
+    active_renewed: list[ActivityUserResult] = field(default_factory=list)
 
 
 @dataclass
@@ -201,6 +207,7 @@ DEFAULT_PUBLIC_SETTINGS = {
     "points_renewal_enabled": "true",
     "points_renewal_cost_points": "100",
     "points_renewal_extension_days": "30",
+    "expiration_enforcement_enabled": "true",
     "points_unban_enabled": "false",
     "points_unban_cost_points": "100",
 }
@@ -275,7 +282,9 @@ class MembershipService:
                     path = str(panel_photo_path).strip() if panel_photo_path is not None else ""
                     await self._set_setting(session, "panel_photo_path", path)
                 if rebind_review_chat_id is not _UNSET:
-                    chat_id = "" if rebind_review_chat_id is None else str(int(rebind_review_chat_id))
+                    chat_id = (
+                        "" if rebind_review_chat_id is None else str(int(rebind_review_chat_id))
+                    )
                     await self._set_setting(session, "rebind_review_chat_id", chat_id)
                 if main_group_chat_id is not _UNSET:
                     chat_id = "" if main_group_chat_id is None else str(int(main_group_chat_id))
@@ -388,6 +397,15 @@ class MembershipService:
                 values = await self._settings_map(session)
         return self._public_settings(values)
 
+    async def set_expiration_enforcement(self, *, enabled: bool) -> PublicSettings:
+        async with self.session_factory() as session:
+            async with session.begin():
+                await self._set_setting(
+                    session, "expiration_enforcement_enabled", _bool_text(enabled)
+                )
+                values = await self._settings_map(session)
+        return self._public_settings(values)
+
     async def set_points_unban(self, *, enabled: bool, cost_points: int) -> PublicSettings:
         async with self.session_factory() as session:
             async with session.begin():
@@ -420,7 +438,9 @@ class MembershipService:
     async def get_profile(self, telegram_id: int) -> TgUser:
         async with self.session_factory() as session:
             async with session.begin():
-                return _normalize_user_datetimes(await self._get_or_create_user(session, telegram_id))
+                return _normalize_user_datetimes(
+                    await self._get_or_create_user(session, telegram_id)
+                )
 
     async def list_users(self, *, whitelisted: bool = False, offset: int = 0, limit: int = 10):
         async with self.session_factory() as session:
@@ -653,7 +673,9 @@ class MembershipService:
                 )
                 return result.rowcount
 
-    async def redeem_code(self, telegram_id: int, code: str, now: datetime | None = None) -> RedeemResult:
+    async def redeem_code(
+        self, telegram_id: int, code: str, now: datetime | None = None
+    ) -> RedeemResult:
         now = ensure_utc(now) or utc_now()
         normalized = normalize_code(code)
         async with self.session_factory() as session:
@@ -705,7 +727,9 @@ class MembershipService:
                         message = f"已续期 {redeem.days} 天"
                     else:
                         system = self._system_settings(await self._settings_map(session))
-                        user.renewal_days = (user.renewal_days or system.default_register_days) + redeem.days
+                        user.renewal_days = (
+                            user.renewal_days or system.default_register_days
+                        ) + redeem.days
                         message = f"已增加续期天数 {redeem.days} 天"
                 elif redeem.code_type == RedeemCodeType.WHITELIST:
                     user.is_whitelisted = True
@@ -744,9 +768,9 @@ class MembershipService:
                         return await self._queue_position(session, existing.id)
 
                     count = await session.scalar(
-                        select(func.count()).select_from(RegistrationQueue).where(
-                            RegistrationQueue.status.in_(ACTIVE_REGISTRATION_QUEUE_STATUSES)
-                        )
+                        select(func.count())
+                        .select_from(RegistrationQueue)
+                        .where(RegistrationQueue.status.in_(ACTIVE_REGISTRATION_QUEUE_STATUSES))
                     )
                     position = int(count or 0) + 1
                     queue_item = RegistrationQueue(
@@ -776,7 +800,9 @@ class MembershipService:
         if item is None:
             return 0
         before = await session.scalar(
-            select(func.count()).select_from(RegistrationQueue).where(
+            select(func.count())
+            .select_from(RegistrationQueue)
+            .where(
                 RegistrationQueue.status.in_(ACTIVE_REGISTRATION_QUEUE_STATUSES),
                 or_(
                     RegistrationQueue.created_at < item.created_at,
@@ -801,7 +827,11 @@ class MembershipService:
                     ),
                     RegistrationQueue.notification_delivered.is_(False),
                 )
-                .order_by(RegistrationQueue.processed_at, RegistrationQueue.created_at, RegistrationQueue.id)
+                .order_by(
+                    RegistrationQueue.processed_at,
+                    RegistrationQueue.created_at,
+                    RegistrationQueue.id,
+                )
                 .limit(1)
             )
             if item is None:
@@ -847,7 +877,9 @@ class MembershipService:
                     telegram_id = item.telegram_id
                     username = item.abs_username
                     reserved_password = item.result_password
-                    user = await session.scalar(select(TgUser).where(TgUser.telegram_id == telegram_id))
+                    user = await session.scalar(
+                        select(TgUser).where(TgUser.telegram_id == telegram_id)
+                    )
                     if user is not None and user.abs_user_id and user.abs_password:
                         item.status = RegistrationQueueStatus.DONE
                         item.result_password = user.abs_password
@@ -1249,7 +1281,9 @@ class MembershipService:
                 elif current.telegram_id == requester.telegram_id:
                     raise ValueError("申请人已经绑定了该账号")
                 else:
-                    await self._transfer_account_ownership(session, current, requester, request, now=now)
+                    await self._transfer_account_ownership(
+                        session, current, requester, request, now=now
+                    )
 
                 request.status = RebindRequestStatus.APPROVED
                 request.reviewed_by = reviewer_telegram_id
@@ -1309,9 +1343,7 @@ class MembershipService:
         """
         async with self.session_factory() as session:
             async with session.begin():
-                user = await session.scalar(
-                    select(TgUser).where(TgUser.telegram_id == telegram_id)
-                )
+                user = await session.scalar(select(TgUser).where(TgUser.telegram_id == telegram_id))
                 if user is None:
                     return False
                 if user.abs_user_id:
@@ -1327,14 +1359,10 @@ class MembershipService:
                     delete(RedeemCodeUse).where(RedeemCodeUse.telegram_id == telegram_id)
                 )
                 await session.execute(
-                    delete(RebindRequest).where(
-                        RebindRequest.requester_telegram_id == telegram_id
-                    )
+                    delete(RebindRequest).where(RebindRequest.requester_telegram_id == telegram_id)
                 )
                 await session.execute(
-                    delete(RegistrationQueue).where(
-                        RegistrationQueue.telegram_id == telegram_id
-                    )
+                    delete(RegistrationQueue).where(RegistrationQueue.telegram_id == telegram_id)
                 )
                 await session.delete(user)
         logger.info("退群清理：已删除用户 tg=%s 的账号和全部记录", telegram_id)
@@ -1379,7 +1407,9 @@ class MembershipService:
                     )
                     return _normalize_user_datetimes(user)
                 user.last_seen_at = from_millis(user_data.get("lastSeen"))
-                user.last_played_at = from_millis(session_data.get("updatedAt")) if session_data else None
+                user.last_played_at = (
+                    from_millis(session_data.get("updatedAt")) if session_data else None
+                )
                 return _normalize_user_datetimes(user)
 
     async def sync_all_activity(self) -> None:
@@ -1394,74 +1424,51 @@ class MembershipService:
         for user in users:
             await self.sync_profile_activity(user.telegram_id)
 
-    async def process_activity_check(self, *, now: datetime | None = None) -> ActivityCheckResult:
+    async def process_active_renewals(
+        self, *, now: datetime | None = None, force: bool = False
+    ) -> ActivityCheckResult:
         now = ensure_utc(now) or utc_now()
-        await self.sync_all_activity()
-        disabled: list[ActivityUserResult] = []
-        deleted: list[ActivityUserResult] = []
         async with self.session_factory() as session:
             async with session.begin():
                 values = await self._settings_map(session)
                 settings = self._public_settings(values)
-                system = self._system_settings(values)
+                if not force and not settings.active_retention_enabled:
+                    logger.info("活跃续期：活跃续期开关已关闭，跳过任务")
+                    return ActivityCheckResult(total_synced=0, disabled=[], deleted=[])
+
+        await self.sync_all_activity()
+        active_renewed: list[ActivityUserResult] = []
+        async with self.session_factory() as session:
+            async with session.begin():
+                values = await self._settings_map(session)
+                settings = self._public_settings(values)
                 users = list(
                     (
-                        await session.scalars(
-                            select(TgUser).where(TgUser.abs_user_id.is_not(None))
-                        )
+                        await session.scalars(select(TgUser).where(TgUser.abs_user_id.is_not(None)))
                     ).all()
                 )
-                if not settings.active_retention_enabled:
+                if not force and not settings.active_retention_enabled:
                     logger.info(
-                        "活跃检测：活跃保号功能已关闭，跳过禁用检查，共 %d 位用户",
+                        "活跃续期：活跃续期开关已关闭，跳过任务，共 %d 位用户",
                         len(users),
                     )
                 else:
                     cutoff = now - timedelta(days=settings.active_retention_window_days)
                     logger.info(
-                        "活跃检测开始：共 %d 位用户，活跃窗口 %d 天，截止时间 %s",
+                        "活跃续期开始：共 %d 位用户，活跃窗口 %d 天，截止时间 %s",
                         len(users),
                         settings.active_retention_window_days,
                         format_dt(cutoff),
                     )
                     for user in users:
-                        # 已禁用 → 检查是否达到自动删除阈值
                         if user.is_disabled:
-                            if self._should_auto_delete_disabled(user, system, now):
-                                disabled_at = self._disabled_since(user)
-                                logger.info(
-                                    "用户 %s (tg=%d) 已禁用超过 %d 天，即将删除 | 禁用时间=%s",
-                                    user.abs_username or user.abs_user_id,
-                                    user.telegram_id,
-                                    system.disabled_delete_after_days,
-                                    format_dt(disabled_at),
-                                )
-                                await self._delete_abs_user(session, user)
-                                deleted.append(
-                                    ActivityUserResult(
-                                        telegram_id=user.telegram_id,
-                                        abs_user_id=user.abs_user_id,
-                                        abs_username=user.abs_username,
-                                        disabled_at=disabled_at,
-                                        deleted_at=now,
-                                    )
-                                )
-                                user.abs_user_id = None
-                                user.abs_username = None
-                                user.abs_password = None
-                                user.expires_at = None
-                                user.last_seen_at = None
-                                user.last_played_at = None
-                                user.is_disabled = False
-                                user.disabled_at = None
-                            else:
-                                logger.debug(
-                                    "用户 %s (tg=%d) 已禁用，尚未达到删除阈值，跳过 | 最后登录=%s 最后播放=%s",
-                                    user.abs_username or user.abs_user_id,
-                                    user.telegram_id,
-                                    format_dt(user.last_seen_at),
-                                    format_dt(user.last_played_at),
-                                )
+                            logger.debug(
+                                "用户 %s (tg=%d) 已禁用，活跃续期任务跳过 | 最后登录=%s 最后播放=%s",
+                                user.abs_username or user.abs_user_id,
+                                user.telegram_id,
+                                format_dt(user.last_seen_at),
+                                format_dt(user.last_played_at),
+                            )
                             continue
 
                         if user.is_whitelisted:
@@ -1484,53 +1491,114 @@ class MembershipService:
                                 format_dt(user.last_played_at),
                                 format_dt(latest_activity),
                             )
+                            extended_until = now + timedelta(
+                                days=settings.active_retention_extension_days
+                            )
+                            current_expires_at = ensure_utc(user.expires_at)
+                            if current_expires_at is None or current_expires_at < extended_until:
+                                user.expires_at = extended_until
+                                user.renewal_days = None
+                                active_renewed.append(
+                                    ActivityUserResult(
+                                        telegram_id=user.telegram_id,
+                                        abs_user_id=user.abs_user_id,
+                                        abs_username=user.abs_username,
+                                    )
+                                )
                             continue
 
                         logger.info(
-                            "用户 %s (tg=%d) 不活跃，即将禁用 | 最后登录=%s 最后播放=%s 最近活跃=%s",
+                            "用户 %s (tg=%d) 不活跃，活跃续期任务不处理禁用 | 最后登录=%s 最后播放=%s 最近活跃=%s",
                             user.abs_username or user.abs_user_id,
                             user.telegram_id,
                             format_dt(user.last_seen_at),
                             format_dt(user.last_played_at),
                             format_dt(latest_activity),
                         )
-                        await self._disable_abs_user(session, user)
-                        user.is_disabled = True
-                        user.disabled_at = now
-                        disabled.append(
-                            ActivityUserResult(
-                                telegram_id=user.telegram_id,
-                                abs_user_id=user.abs_user_id,
-                                abs_username=user.abs_username,
-                                disabled_at=now,
+                    logger.info(
+                        "活跃续期完成：检测 %d 位，续期 %d 位",
+                        len(users),
+                        len(active_renewed),
+                    )
+        return ActivityCheckResult(
+            total_synced=len(users),
+            disabled=[],
+            deleted=[],
+            active_renewed=active_renewed,
+        )
+
+
+    async def process_points_renewals(
+        self, *, now: datetime | None = None, force: bool = False
+    ) -> ExpirationProcessResult:
+        now = ensure_utc(now) or utc_now()
+        points_renewed: list[ExpirationUserResult] = []
+        async with self.session_factory() as session:
+            async with session.begin():
+                values = await self._settings_map(session)
+                settings = self._public_settings(values)
+                if not force and not settings.points_renewal_enabled:
+                    logger.info("积分续期开关已关闭，跳过积分续期任务")
+                    return ExpirationProcessResult(
+                        active_renewed=[], points_renewed=[], disabled=[], deleted=[]
+                    )
+                users = list(
+                    (
+                        await session.scalars(select(TgUser).where(TgUser.abs_user_id.is_not(None)))
+                    ).all()
+                )
+                for user in users:
+                    if user.is_whitelisted:
+                        continue
+                    expires_at = ensure_utc(user.expires_at)
+                    if expires_at is None or expires_at > now:
+                        continue
+                    if user.points >= settings.points_renewal_cost_points:
+                        user.points -= settings.points_renewal_cost_points
+                        user.expires_at = now + timedelta(
+                            days=settings.points_renewal_extension_days
+                        )
+                        user.renewal_days = None
+                        if user.is_disabled and user.abs_user_id:
+                            await self._restore_abs_user(session, user)
+                            user.is_disabled = False
+                            user.disabled_at = None
+                        points_renewed.append(
+                            _expiration_user_result(
+                                user,
+                                points_spent=settings.points_renewal_cost_points,
                             )
                         )
-                    logger.info(
-                        "活跃检测完成：检测 %d 位，禁用 %d 位，删除 %d 位",
-                        len(users),
-                        len(disabled),
-                        len(deleted),
-                    )
-        return ActivityCheckResult(total_synced=len(users), disabled=disabled, deleted=deleted)
+                        continue
 
-    async def process_expirations(self, *, now: datetime | None = None) -> ExpirationProcessResult:
+        return ExpirationProcessResult(
+            active_renewed=[],
+            points_renewed=points_renewed,
+            disabled=[],
+            deleted=[],
+        )
+
+    async def process_expiration_enforcement(
+        self, *, now: datetime | None = None, force: bool = False
+    ) -> ExpirationProcessResult:
         now = ensure_utc(now) or utc_now()
         await self._backfill_legacy_disabled_at(now)
-        await self.sync_all_activity()
-        active_renewed: list[ExpirationUserResult] = []
-        points_renewed: list[ExpirationUserResult] = []
+
         disabled: list[ExpirationUserResult] = []
         deleted: list[ExpirationUserResult] = []
         async with self.session_factory() as session:
             async with session.begin():
                 values = await self._settings_map(session)
                 settings = self._public_settings(values)
+                if not force and not settings.expiration_enforcement_enabled:
+                    logger.info("到期检查开关已关闭，跳过到期检查任务")
+                    return ExpirationProcessResult(
+                        active_renewed=[], points_renewed=[], disabled=[], deleted=[]
+                    )
                 system = self._system_settings(values)
                 users = list(
                     (
-                        await session.scalars(
-                            select(TgUser).where(TgUser.abs_user_id.is_not(None))
-                        )
+                        await session.scalars(select(TgUser).where(TgUser.abs_user_id.is_not(None)))
                     ).all()
                 )
                 for user in users:
@@ -1559,44 +1627,18 @@ class MembershipService:
                     expires_at = ensure_utc(user.expires_at)
                     if expires_at is None or expires_at > now:
                         continue
-
-                    if self._can_active_extend(user, settings, now):
-                        user.expires_at = now + timedelta(days=settings.active_retention_extension_days)
-                        user.renewal_days = None
-                        if user.is_disabled and user.abs_user_id:
-                            await self._restore_abs_user(session, user)
-                            user.is_disabled = False
-                            user.disabled_at = None
-                        active_renewed.append(_expiration_user_result(user))
-                        continue
-
-                    if settings.points_renewal_enabled and user.points >= settings.points_renewal_cost_points:
-                        user.points -= settings.points_renewal_cost_points
-                        user.expires_at = now + timedelta(days=settings.points_renewal_extension_days)
-                        user.renewal_days = None
-                        if user.is_disabled and user.abs_user_id:
-                            await self._restore_abs_user(session, user)
-                            user.is_disabled = False
-                            user.disabled_at = None
-                        points_renewed.append(
-                            _expiration_user_result(
-                                user,
-                                points_spent=settings.points_renewal_cost_points,
-                            )
-                        )
-                        continue
-
                     if not user.is_disabled and user.abs_user_id:
                         await self._disable_abs_user(session, user)
                         user.is_disabled = True
                         user.disabled_at = now
                         disabled.append(_expiration_user_result(user, disabled_at=now))
         return ExpirationProcessResult(
-            active_renewed=active_renewed,
-            points_renewed=points_renewed,
+            active_renewed=[],
+            points_renewed=[],
             disabled=disabled,
             deleted=deleted,
         )
+
 
     def _should_auto_delete_disabled(
         self, user: TgUser, settings: SystemSettings, now: datetime
@@ -1631,14 +1673,6 @@ class MembershipService:
                 )
                 for user in users:
                     user.disabled_at = ensure_utc(user.updated_at) or now
-
-    def _can_active_extend(self, user: TgUser, settings: PublicSettings, now: datetime) -> bool:
-        if not settings.active_retention_enabled:
-            return False
-        latest_activity = max_datetime(user.last_seen_at, user.last_played_at)
-        return latest_activity is not None and latest_activity >= now - timedelta(
-            days=settings.active_retention_window_days
-        )
 
     async def _authenticate_existing_account(self, username: str, password: str) -> tuple[str, str]:
         clean_username = username.strip()
@@ -1714,7 +1748,9 @@ class MembershipService:
         requester.abs_user_id = request.abs_user_id
         requester.abs_username = request.abs_username
         requester.abs_password = abs_password
-        requester.registration_credits = 1 if requester.registration_credits or registration_credits else 0
+        requester.registration_credits = (
+            1 if requester.registration_credits or registration_credits else 0
+        )
         requester.points = points
         requester.is_whitelisted = requester.is_whitelisted or is_whitelisted
 
@@ -1767,6 +1803,7 @@ class MembershipService:
             points_renewal_enabled=_as_bool(values["points_renewal_enabled"]),
             points_renewal_cost_points=int(values["points_renewal_cost_points"]),
             points_renewal_extension_days=int(values["points_renewal_extension_days"]),
+            expiration_enforcement_enabled=_as_bool(values["expiration_enforcement_enabled"]),
             points_unban_enabled=_as_bool(values["points_unban_enabled"]),
             points_unban_cost_points=int(values["points_unban_cost_points"]),
         )
@@ -1883,9 +1920,7 @@ class MembershipService:
         - 任何异常      → 记入 failed_count，继续下一条
         """
         async with self.session_factory() as session:
-            result = await session.execute(
-                select(TgUser).where(TgUser.abs_user_id.isnot(None))
-            )
+            result = await session.execute(select(TgUser).where(TgUser.abs_user_id.isnot(None)))
             users = list(result.scalars().all())
 
         synced_count = 0

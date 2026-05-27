@@ -17,6 +17,7 @@ from absbot.keyboards import (
     code_list_keyboard,
     code_panel_keyboard,
     registration_claim_keyboard,
+    task_confirm_keyboard,
     target_user_keyboard,
     tasks_panel_keyboard,
     users_page_keyboard,
@@ -24,9 +25,10 @@ from absbot.keyboards import (
 from absbot.leaderboard import LeaderboardService
 from absbot.panels import replace_panel, send_panel
 from absbot.scheduler import (
-    notify_activity_check_result,
+    run_active_renewal_job,
     run_daily_leaderboard_job,
-    run_expiration_job,
+    run_expiration_enforcement_job,
+    run_points_renewal_job,
     run_weekly_leaderboard_job,
     sync_registration_announcement,
 )
@@ -59,9 +61,53 @@ from .states import AdminStates
 logger = logging.getLogger(__name__)
 router = Router()
 
+TASK_CONFIRM_TEXT = {
+    "active": (
+        "确认执行活跃续期？\n\n"
+        "任务说明：同步 Audiobookshelf 活跃信息；对活跃窗口内有登录或播放记录的用户延长有效期。\n"
+        "影响范围：不会禁用用户，不会删除账号。\n"
+    ),
+    "points": (
+        "确认执行积分续期？\n\n"
+        "任务说明：检查已到期用户；积分足够时自动扣除积分并延长有效期。\n"
+        "影响范围：不会禁用用户，不会删除账号。\n"
+    ),
+    "expiration": (
+        "确认执行到期检查？\n\n"
+        "任务说明：禁用已经到期的用户；删除已禁用且超过保留天数的账号。\n"
+        "影响范围：可能禁用用户，也可能删除 Audiobookshelf 账号。\n"
+    ),
+}
+
+
+def _tasks_keyboard(public):
+    return tasks_panel_keyboard(
+        active_enabled=public.active_retention_enabled,
+        points_enabled=public.points_renewal_enabled,
+        expiration_enabled=public.expiration_enforcement_enabled,
+    )
+
+
+async def _show_task_confirmation(
+    callback: CallbackQuery, service: MembershipService, task: str
+) -> None:
+    text = TASK_CONFIRM_TEXT.get(task)
+    if text is None:
+        await callback.answer("未知任务", show_alert=True)
+        return
+    await callback.answer()
+    await replace_panel(
+        callback,
+        text,
+        reply_markup=task_confirm_keyboard(task),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
 
 @router.callback_query(F.data == "admin:home")
-async def admin_home(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def admin_home(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     await callback.answer()
@@ -114,6 +160,7 @@ async def admin_start_panel(
 # Registration slots
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "admin:reg")
 async def ask_registration_slots(
     callback: CallbackQuery, state: FSMContext, settings: Settings
@@ -160,6 +207,7 @@ async def set_registration_slots(
 # Server lines
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "admin:lines")
 async def ask_server_lines(
     callback: CallbackQuery, state: FSMContext, service: MembershipService, settings: Settings
@@ -205,8 +253,11 @@ async def set_server_lines(
 # Checkin & points unban
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "admin:checkin")
-async def toggle_checkin(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def toggle_checkin(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     public = await service.get_public_settings()
@@ -230,12 +281,16 @@ async def toggle_checkin(callback: CallbackQuery, service: MembershipService, se
 
 
 @router.callback_query(F.data == "admin:checkinpoints")
-async def ask_checkin_points(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
+async def ask_checkin_points(
+    callback: CallbackQuery, state: FSMContext, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     await state.set_state(AdminStates.checkin_points)
     await callback.answer()
-    await _edit_prompt_message(callback.message, "请输入每次签到赠送的积分范围，格式：min max，例如：1 10。")
+    await _edit_prompt_message(
+        callback.message, "请输入每次签到赠送的积分范围，格式：min max，例如：1 10。"
+    )
 
 
 @router.message(AdminStates.checkin_points)
@@ -351,6 +406,7 @@ async def set_unban_cost(
 # Tasks panel
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "admin:tasks")
 async def tasks_panel(
     callback: CallbackQuery,
@@ -365,17 +421,17 @@ async def tasks_panel(
     await replace_panel(
         callback,
         _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
+        reply_markup=_tasks_keyboard(public),
         panel_photo_path=await _panel_photo_path(service),
     )
 
 
 @router.callback_query(F.data == "admin:active")
 async def toggle_active_retention(
-    callback: CallbackQuery, service: MembershipService, settings: Settings, scheduler: AsyncIOScheduler
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
 ) -> None:
     if not await _require_admin(callback, settings):
         return
@@ -385,22 +441,22 @@ async def toggle_active_retention(
         window_days=public.active_retention_window_days,
         extension_days=public.active_retention_extension_days,
     )
-    await callback.answer("已切换活跃保号")
+    await callback.answer("已切换活跃续期")
     public = await service.get_public_settings()
     await replace_panel(
         callback,
         _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
+        reply_markup=_tasks_keyboard(public),
         panel_photo_path=await _panel_photo_path(service),
     )
 
 
 @router.callback_query(F.data == "admin:pointsrenew")
 async def toggle_points_renewal(
-    callback: CallbackQuery, service: MembershipService, settings: Settings, scheduler: AsyncIOScheduler
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
 ) -> None:
     if not await _require_admin(callback, settings):
         return
@@ -415,10 +471,103 @@ async def toggle_points_renewal(
     await replace_panel(
         callback,
         _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
+        reply_markup=_tasks_keyboard(public),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
+
+@router.callback_query(F.data == "admin:expiration")
+async def toggle_expiration_enforcement(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    public = await service.get_public_settings()
+    await service.set_expiration_enforcement(
+        enabled=not public.expiration_enforcement_enabled,
+    )
+    await callback.answer("已切换到期检查")
+    public = await service.get_public_settings()
+    await replace_panel(
+        callback,
+        _build_tasks_panel_text(public, scheduler),
+        reply_markup=_tasks_keyboard(public),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:confirm_run:"))
+async def confirm_task_run(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    task = (callback.data or "").rsplit(":", 1)[-1]
+    await _show_task_confirmation(callback, service, task)
+
+
+@router.callback_query(F.data == "admin:run_cancel")
+async def cancel_task_run(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    await callback.answer("已取消")
+    public = await service.get_public_settings()
+    await replace_panel(
+        callback,
+        _build_tasks_panel_text(public, scheduler),
+        reply_markup=_tasks_keyboard(public),
+        panel_photo_path=await _panel_photo_path(service),
+    )
+
+
+@router.callback_query(F.data.startswith("admin:run_confirmed:"))
+async def run_confirmed_task(
+    callback: CallbackQuery,
+    service: MembershipService,
+    settings: Settings,
+    scheduler: AsyncIOScheduler,
+) -> None:
+    if not await _require_admin(callback, settings):
+        return
+    task = (callback.data or "").rsplit(":", 1)[-1]
+    if task == "active":
+        await callback.answer("活跃续期任务已启动，请稍候…")
+        result = await run_active_renewal_job(service, callback.bot, force=True)
+        await callback.message.answer(
+            f"✅ 活跃续期已完成，共检测 {result.total_synced} 位用户，"
+            f"活跃续期 {len(result.active_renewed)} 位。"
+        )
+    elif task == "points":
+        await callback.answer("积分续期任务已启动，请稍候…")
+        result = await run_points_renewal_job(service, callback.bot, force=True)
+        await callback.message.answer(
+            f"✅ 积分续期已完成，积分续期 {len(result.points_renewed)} 位。"
+        )
+    elif task == "expiration":
+        await callback.answer("到期检查任务已启动，请稍候…")
+        result = await run_expiration_enforcement_job(service, callback.bot, force=True)
+        await callback.message.answer(
+            f"✅ 到期检查已完成，禁用 {len(result.disabled)} 位，删除 {len(result.deleted)} 位。"
+        )
+    else:
+        await callback.answer("未知任务", show_alert=True)
+        return
+    public = await service.get_public_settings()
+    await replace_panel(
+        callback,
+        _build_tasks_panel_text(public, scheduler),
+        reply_markup=_tasks_keyboard(public),
         panel_photo_path=await _panel_photo_path(service),
     )
 
@@ -432,24 +581,7 @@ async def run_activity_check(
 ) -> None:
     if not await _require_admin(callback, settings):
         return
-    await callback.answer("活跃检测任务已启动，请稍候…")
-    result = await service.process_activity_check()
-    system = await service.get_system_settings()
-    await notify_activity_check_result(callback.bot, system, result)
-    await callback.message.answer(
-        f"✅ 活跃检测已完成，共检测 {result.total_synced} 位用户，"
-        f"禁用 {len(result.disabled)} 位，删除 {len(result.deleted)} 位。"
-    )
-    public = await service.get_public_settings()
-    await replace_panel(
-        callback,
-        _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
-        panel_photo_path=await _panel_photo_path(service),
-    )
+    await _show_task_confirmation(callback, service, "active")
 
 
 @router.callback_query(F.data == "admin:run_expiration")
@@ -461,23 +593,7 @@ async def run_expiration_check(
 ) -> None:
     if not await _require_admin(callback, settings):
         return
-    await callback.answer("到期检测任务已启动，请稍候…")
-    result = await run_expiration_job(service, callback.bot)
-    await callback.message.answer(
-        f"✅ 到期检测已完成，活跃续期 {len(result.active_renewed)} 位，"
-        f"积分续期 {len(result.points_renewed)} 位，禁用 {len(result.disabled)} 位，"
-        f"删除 {len(result.deleted)} 位。"
-    )
-    public = await service.get_public_settings()
-    await replace_panel(
-        callback,
-        _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
-        panel_photo_path=await _panel_photo_path(service),
-    )
+    await _show_task_confirmation(callback, service, "expiration")
 
 
 @router.callback_query(F.data == "admin:push_leaderboard:daily")
@@ -497,10 +613,7 @@ async def push_daily_leaderboard(
     await replace_panel(
         callback,
         _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
+        reply_markup=_tasks_keyboard(public),
         panel_photo_path=await _panel_photo_path(service),
     )
 
@@ -522,10 +635,7 @@ async def push_weekly_leaderboard(
     await replace_panel(
         callback,
         _build_tasks_panel_text(public, scheduler),
-        reply_markup=tasks_panel_keyboard(
-            active_enabled=public.active_retention_enabled,
-            points_enabled=public.points_renewal_enabled,
-        ),
+        reply_markup=_tasks_keyboard(public),
         panel_photo_path=await _panel_photo_path(service),
     )
 
@@ -534,8 +644,11 @@ async def push_weekly_leaderboard(
 # Redeem codes
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "admin:codes")
-async def code_panel(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def code_panel(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     await callback.answer()
@@ -561,7 +674,7 @@ async def ask_code_payload(callback: CallbackQuery, state: FSMContext, settings:
         "格式：days count\n"
         f"默认自动生成兑换码；count 可省略，单次最多 {MAX_REDEEM_CODES_PER_BATCH} 个。\n"
         "白名单码只需输入 count。\n"
-        "示例：30 10"
+        "示例：30 10",
     )
 
 
@@ -624,14 +737,18 @@ _CODE_TYPE_LABELS = {
 
 
 @router.callback_query(F.data.startswith("admin:codelist:"))
-async def list_codes(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def list_codes(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     parts = callback.data.split(":")
     code_type_str = parts[2]
     page = int(parts[3])
     code_type = RedeemCodeType(code_type_str)
-    codes = await service.list_redeem_codes(code_type=code_type, offset=page * 10, limit=10, usable=True)
+    codes = await service.list_redeem_codes(
+        code_type=code_type, offset=page * 10, limit=10, usable=True
+    )
     label = _CODE_TYPE_LABELS.get(code_type_str, code_type_str)
     lines = [f"{label}列表"]
     for code in codes:
@@ -646,7 +763,9 @@ async def list_codes(callback: CallbackQuery, service: MembershipService, settin
 
 
 @router.callback_query(F.data.startswith("code:"))
-async def code_action(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def code_action(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     parts = callback.data.split(":")
@@ -662,7 +781,9 @@ async def code_action(callback: CallbackQuery, service: MembershipService, setti
         code_type_str, page_str = parts[2], parts[3]
         page = int(page_str)
         code_type = RedeemCodeType(code_type_str)
-        current = await service.list_redeem_codes(code_type=code_type, offset=page * 10, limit=10, usable=True)
+        current = await service.list_redeem_codes(
+            code_type=code_type, offset=page * 10, limit=10, usable=True
+        )
         ids = [c.id for c in current]
         n = await service.delete_redeem_codes_bulk(code_type=code_type, ids=ids)
         await callback.answer(f"已删除本页 {n} 条")
@@ -676,13 +797,17 @@ async def code_action(callback: CallbackQuery, service: MembershipService, setti
         # code:delused:{code_type}
         code_type_str = parts[2]
         page_str = "0"
-        n = await service.delete_redeem_codes_bulk(code_type=RedeemCodeType(code_type_str), used=True)
+        n = await service.delete_redeem_codes_bulk(
+            code_type=RedeemCodeType(code_type_str), used=True
+        )
         await callback.answer(f"已删除 {n} 条已使用")
     elif action == "delunused":
         # code:delunused:{code_type}
         code_type_str = parts[2]
         page_str = "0"
-        n = await service.delete_redeem_codes_bulk(code_type=RedeemCodeType(code_type_str), used=False)
+        n = await service.delete_redeem_codes_bulk(
+            code_type=RedeemCodeType(code_type_str), used=False
+        )
         await callback.answer(f"已删除 {n} 条未使用")
     else:
         await callback.answer("未知操作")
@@ -690,7 +815,9 @@ async def code_action(callback: CallbackQuery, service: MembershipService, setti
 
     page = int(page_str)
     code_type = RedeemCodeType(code_type_str)
-    codes = await service.list_redeem_codes(code_type=code_type, offset=page * 10, limit=10, usable=True)
+    codes = await service.list_redeem_codes(
+        code_type=code_type, offset=page * 10, limit=10, usable=True
+    )
     label = _CODE_TYPE_LABELS.get(code_type_str, code_type_str)
     lines = [f"{label}列表"]
     for code in codes:
@@ -707,19 +834,18 @@ async def code_action(callback: CallbackQuery, service: MembershipService, setti
 # User list & target management
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data.startswith("admin:users:"))
-async def list_all_users(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def list_all_users(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     page = int(callback.data.rsplit(":", 1)[1])
     users = await service.list_users(offset=page * 10, limit=10)
     db_count, abs_count = await service.get_user_counts()
     abs_count_str = str(abs_count) if abs_count is not None else "未知"
-    text = (
-        "👥 用户列表\n"
-        f"📊 Bot 数据库账号数：{db_count}\n"
-        f"🖥️ ABS 服务器用户数：{abs_count_str}"
-    )
+    text = f"👥 用户列表\n📊 Bot 数据库账号数：{db_count}\n🖥️ ABS 服务器用户数：{abs_count_str}"
     await callback.answer()
     await replace_panel(
         callback,
@@ -730,7 +856,9 @@ async def list_all_users(callback: CallbackQuery, service: MembershipService, se
 
 
 @router.callback_query(F.data.startswith("admin:white:"))
-async def list_white_users(callback: CallbackQuery, service: MembershipService, settings: Settings) -> None:
+async def list_white_users(
+    callback: CallbackQuery, service: MembershipService, settings: Settings
+) -> None:
     if not await _require_admin(callback, settings):
         return
     page = int(callback.data.rsplit(":", 1)[1])
@@ -840,6 +968,7 @@ async def target_actions(
         await callback.answer("已更新白名单")
         if new_status:
             import random
+
             quotes = [
                 "欲知后事如何，且听下回分解！恭喜您荣登贵宾白名单，往后听书畅通无阻！",
                 "说时迟，那时快！掌柜的手起笔落，已将您列入贵宾免单名册！",
@@ -848,7 +977,7 @@ async def target_actions(
                 "古人有诗云：踏破铁鞋无觅处，得来全不费工夫。金牌在手（白名单已至），听书大吉！",
                 "非是臣子多饶舌，确是主公有德声。恭喜您被特赐贵宾白名单，从此书山任君行！",
                 "大江东去，浪淘尽，千古风流人物。今日这书场上，您便是免单的上宾，请慢用！",
-                "天下风云出我辈，一入江湖岁月催。白名单金牌已赐，您只管安心听书！"
+                "天下风云出我辈，一入江湖岁月催。白名单金牌已赐，您只管安心听书！",
             ]
             quote = random.choice(quotes)
             try:
@@ -921,6 +1050,7 @@ async def adjust_expiry_from_payload(
 # ---------------------------------------------------------------------------
 # Rebind review
 # ---------------------------------------------------------------------------
+
 
 @router.callback_query(F.data.startswith("rebind:"))
 async def review_rebind_request(

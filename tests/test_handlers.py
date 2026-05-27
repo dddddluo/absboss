@@ -31,7 +31,13 @@ from absbot.keyboards import (
     user_panel_keyboard,
 )
 from absbot.models import RedeemCodeType, TgUser
-from absbot.service import ExpirationProcessResult, ExpirationUserResult, PublicSettings
+from absbot.service import (
+    ExpirationProcessResult,
+    ExpirationUserResult,
+    PublicSettings,
+    ActivityCheckResult,
+    ActivityUserResult,
+)
 
 
 class User:
@@ -292,11 +298,15 @@ class FakeRegistrationSlotService:
         return FakeSystemSettings(main_group_chat_id=-100123)
 
     async def get_public_settings(self):
-        return _settings(registration_open=bool(self.registration_calls and self.registration_calls[-1][0]))
+        return _settings(
+            registration_open=bool(self.registration_calls and self.registration_calls[-1][0])
+        )
 
 
 class FakeCreateAccountService:
-    def __init__(self, *, public_settings, public_settings_after=None, create_error=None, enqueue_error=None):
+    def __init__(
+        self, *, public_settings, public_settings_after=None, create_error=None, enqueue_error=None
+    ):
         self.public_settings = public_settings
         self.public_settings_after = public_settings_after or public_settings
         self.public_settings_calls = 0
@@ -334,7 +344,24 @@ class FakeExpirationCheckService:
     def __init__(self, result):
         self.result = result
 
-    async def process_expirations(self):
+    async def process_expiration_enforcement(self, *args, **kwargs):
+        return self.result
+
+    async def process_points_renewals(self, *args, **kwargs):
+        return self.result
+
+    async def get_system_settings(self):
+        return FakeSystemSettings(main_group_chat_id=None)
+
+    async def get_public_settings(self):
+        return _settings()
+
+
+class FakeActivityCheckService:
+    def __init__(self, result):
+        self.result = result
+
+    async def process_active_renewals(self, *args, **kwargs):
         return self.result
 
     async def get_system_settings(self):
@@ -402,7 +429,9 @@ async def test_admin_pp_without_target_prompts_for_target(monkeypatch):
 async def test_unauthorized_group_admin_state_message_is_deleted_and_muted():
     message = UnauthorizedMessage("10", from_user_id=2002, chat_type="supergroup")
 
-    await set_registration_slots(message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001}))
+    await set_registration_slots(
+        message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001})
+    )
 
     assert message.deleted is True
     assert len(message.bot.restrictions) == 1
@@ -422,7 +451,9 @@ async def test_unauthorized_private_admin_state_message_ignores_delete_failure_a
         delete_fails=True,
     )
 
-    await set_registration_slots(message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001}))
+    await set_registration_slots(
+        message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001})
+    )
 
     assert message.deleted is False
     assert message.delete_attempts == 1
@@ -434,7 +465,9 @@ async def test_unauthorized_group_logs_failed_mute(caplog):
     message = UnauthorizedMessage("10", from_user_id=2002, chat_type="supergroup")
     message.bot = RestrictBot(restrict_fails=True)
 
-    await set_registration_slots(message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001}))
+    await set_registration_slots(
+        message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001})
+    )
 
     assert "failed to restrict unauthorized user" in caplog.text or "禁言未授权用户" in caplog.text
     assert "2002" in caplog.text
@@ -448,7 +481,9 @@ async def test_non_admin_group_pp_is_deleted_and_muted(monkeypatch):
     monkeypatch.setattr(handlers, "_send_user_panel", fail_send_user_panel)
     message = UnauthorizedMessage("/pp", from_user_id=2002, chat_type="supergroup")
 
-    await handlers.pp_entry(message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001}))
+    await handlers.pp_entry(
+        message, ClearState(), FakeTargetService(), FakeSettings(admin_ids={1001})
+    )
 
     assert message.deleted is True
     assert len(message.bot.restrictions) == 1
@@ -585,6 +620,8 @@ async def test_group_start_bypasses_membership_middleware(command):
     assert service.system_settings_calls == 0
     assert message.bot.chat_member_checks == []
     assert message.answers == []
+
+
 @pytest.mark.asyncio
 async def test_bot_user_bypasses_membership_middleware():
     middleware = handlers.MainGroupMembershipMiddleware()
@@ -607,21 +644,36 @@ async def test_bot_user_bypasses_membership_middleware():
 
 
 def test_uninitialized_start_notice_is_shown_to_owner_or_admin():
-    assert should_show_setup_notice(
-        is_initialized=False, is_owner=True, is_admin=False, owner_configured=True
-    ) is True
-    assert should_show_setup_notice(
-        is_initialized=False, is_owner=False, is_admin=True, owner_configured=False
-    ) is False
-    assert should_show_setup_notice(
-        is_initialized=False, is_owner=False, is_admin=True, owner_configured=True
-    ) is False
-    assert should_show_setup_notice(
-        is_initialized=False, is_owner=False, is_admin=False, owner_configured=False
-    ) is False
-    assert should_show_setup_notice(
-        is_initialized=True, is_owner=True, is_admin=True, owner_configured=True
-    ) is False
+    assert (
+        should_show_setup_notice(
+            is_initialized=False, is_owner=True, is_admin=False, owner_configured=True
+        )
+        is True
+    )
+    assert (
+        should_show_setup_notice(
+            is_initialized=False, is_owner=False, is_admin=True, owner_configured=False
+        )
+        is False
+    )
+    assert (
+        should_show_setup_notice(
+            is_initialized=False, is_owner=False, is_admin=True, owner_configured=True
+        )
+        is False
+    )
+    assert (
+        should_show_setup_notice(
+            is_initialized=False, is_owner=False, is_admin=False, owner_configured=False
+        )
+        is False
+    )
+    assert (
+        should_show_setup_notice(
+            is_initialized=True, is_owner=True, is_admin=True, owner_configured=True
+        )
+        is False
+    )
 
 
 def test_start_keyboard_for_user_without_account_hides_account_actions():
@@ -926,7 +978,9 @@ async def test_sync_registration_announcement_sends_and_stores_message():
     assert photo_entry["chat_id"] == -100123
     assert isinstance(photo_entry["photo"], FSInputFile)
     assert photo_entry["photo"].path == DEFAULT_PANEL_PHOTO_PATH
-    assert photo_entry["caption"] == scheduler.registration_announcement_text(service.public_settings)
+    assert photo_entry["caption"] == scheduler.registration_announcement_text(
+        service.public_settings
+    )
     assert photo_entry["reply_markup"] == "has-keyboard"
     assert bot.sent_messages == []
     assert service.announcement_message == (-100123, 99)
@@ -1060,7 +1114,7 @@ async def test_user_create_account_logs_value_error_rejection(caplog):
     assert "alice" in caplog.text
 
 
-async def test_run_expiration_check_sends_completion_message_to_executor(monkeypatch):
+async def test_run_expiration_check_shows_confirmation(monkeypatch):
     callback = Callback("admin:run_expiration", from_user_id=1001)
     service = FakeExpirationCheckService(
         ExpirationProcessResult(
@@ -1084,9 +1138,121 @@ async def test_run_expiration_check_sends_completion_message_to_executor(monkeyp
         FakeScheduler(),
     )
 
-    assert callback.message.answers == [
-        ("✅ 到期检测已完成，活跃续期 1 位，积分续期 1 位，禁用 1 位，删除 1 位。", {})
-    ]
+    assert callback.message.answers == []
+    assert replaced
+    assert "确认执行到期检查" in replaced[0][0]
+
+
+async def test_run_activity_check_shows_confirmation(monkeypatch):
+    callback = Callback("admin:run_activity", from_user_id=1001)
+    service = FakeActivityCheckService(
+        ActivityCheckResult(
+            total_synced=5,
+            active_renewed=[ActivityUserResult(1, "abs-1", "active")],
+            disabled=[],
+            deleted=[],
+        )
+    )
+    replaced = []
+
+    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None):
+        replaced.append((text, reply_markup, panel_photo_path))
+
+    monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
+
+    await handlers.run_activity_check(
+        callback,
+        service,
+        FakeSettings(admin_ids={1001}),
+        FakeScheduler(),
+    )
+
+    assert callback.message.answers == []
+    assert replaced
+    assert "确认执行活跃续期" in replaced[0][0]
+
+
+async def test_run_confirmed_active_renewal_sends_completion_message(monkeypatch):
+    callback = Callback("admin:run_confirmed:active", from_user_id=1001)
+    service = FakeActivityCheckService(
+        ActivityCheckResult(
+            total_synced=5,
+            active_renewed=[ActivityUserResult(1, "abs-1", "active")],
+            disabled=[],
+            deleted=[],
+        )
+    )
+    replaced = []
+
+    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None):
+        replaced.append((text, reply_markup, panel_photo_path))
+
+    monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
+
+    await handlers.run_confirmed_task(
+        callback,
+        service,
+        FakeSettings(admin_ids={1001}),
+        FakeScheduler(),
+    )
+
+    assert callback.message.answers == [("✅ 活跃续期已完成，共检测 5 位用户，活跃续期 1 位。", {})]
+    assert replaced
+
+
+async def test_run_confirmed_points_renewal_sends_completion_message(monkeypatch):
+    callback = Callback("admin:run_confirmed:points", from_user_id=1001)
+    service = FakeExpirationCheckService(
+        ExpirationProcessResult(
+            active_renewed=[],
+            points_renewed=[_expiration_user(2, "points")],
+            disabled=[],
+            deleted=[],
+        )
+    )
+    replaced = []
+
+    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None):
+        replaced.append((text, reply_markup, panel_photo_path))
+
+    monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
+
+    await handlers.run_confirmed_task(
+        callback,
+        service,
+        FakeSettings(admin_ids={1001}),
+        FakeScheduler(),
+    )
+
+    assert callback.message.answers == [("✅ 积分续期已完成，积分续期 1 位。", {})]
+    assert replaced
+
+
+async def test_run_confirmed_expiration_enforcement_sends_completion_message(monkeypatch):
+    callback = Callback("admin:run_confirmed:expiration", from_user_id=1001)
+    service = FakeExpirationCheckService(
+        ExpirationProcessResult(
+            active_renewed=[],
+            points_renewed=[],
+            disabled=[_expiration_user(3, "disabled")],
+            deleted=[_expiration_user(4, "deleted")],
+        )
+    )
+    replaced = []
+
+    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None):
+        replaced.append((text, reply_markup, panel_photo_path))
+
+    monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
+
+    await handlers.run_confirmed_task(
+        callback,
+        service,
+        FakeSettings(admin_ids={1001}),
+        FakeScheduler(),
+    )
+
+    assert callback.message.answers == [("✅ 到期检查已完成，禁用 1 位，删除 1 位。", {})]
     assert replaced
 
 
@@ -1163,13 +1329,21 @@ async def test_target_grant_group_panel_shows_registration_claim_button(monkeypa
     text, keyboard, panel_photo_path = replaced[0]
     assert '<a href="tg://user?id=1001">@1001</a> 的注册资格已发放。' in text
     assert panel_photo_path is None
-    assert _button_urls(keyboard)["🎁 领取注册资格"] == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    assert (
+        _button_urls(keyboard)["🎁 领取注册资格"]
+        == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    )
     assert callback.bot.sent_photos
-    chat_id, _photo, private_text, private_keyboard, private_parse_mode = callback.bot.sent_photos[0]
+    chat_id, _photo, private_text, private_keyboard, private_parse_mode = callback.bot.sent_photos[
+        0
+    ]
     assert chat_id == 1001
     assert private_text == handlers._registration_claim_text()
     assert private_parse_mode == "HTML"
-    assert _button_urls(private_keyboard)["🎁 领取注册资格"] == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    assert (
+        _button_urls(private_keyboard)["🎁 领取注册资格"]
+        == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    )
 
 
 async def test_target_grant_private_panel_uses_photo_without_claim_button(monkeypatch):
@@ -1188,10 +1362,15 @@ async def test_target_grant_private_panel_uses_photo_without_claim_button(monkey
     await target_actions(callback, state, service, settings)
 
     assert callback.bot.sent_photos
-    chat_id, _photo, private_text, private_keyboard, private_parse_mode = callback.bot.sent_photos[0]
+    chat_id, _photo, private_text, private_keyboard, private_parse_mode = callback.bot.sent_photos[
+        0
+    ]
     assert chat_id == 1001
     assert private_text == handlers._registration_claim_text()
-    assert _button_urls(private_keyboard)["🎁 领取注册资格"] == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    assert (
+        _button_urls(private_keyboard)["🎁 领取注册资格"]
+        == "https://t.me/AudiobookshelfBot?start=gift_1001"
+    )
     assert private_parse_mode == "HTML"
     text, keyboard, panel_photo_path = replaced[0]
     assert '<a href="tg://user?id=1001">@1001</a> 的注册资格已发放。' in text
@@ -1279,7 +1458,7 @@ async def test_target_whitelist_action_notifies_user():
         "得来全不费工夫",
         "非是臣子多饶舌",
         "大江东去，浪淘尽",
-        "天下风云出我辈"
+        "天下风云出我辈",
     ]
     assert any(q in text for q in quotes)
 
@@ -1420,7 +1599,9 @@ async def test_replace_user_panel_syncs_abs_activity_before_rendering(monkeypatc
     service = Service()
     monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
 
-    await handlers._replace_user_panel(Callback("me:info"), service, FakeSettings(admin_ids=set()), 1005)
+    await handlers._replace_user_panel(
+        Callback("me:info"), service, FakeSettings(admin_ids=set()), 1005
+    )
 
     assert service.synced == [1005]
     assert replaced
@@ -1449,7 +1630,7 @@ async def test_ask_server_lines_shows_current_html_lines():
 async def test_user_lines_panel_uses_html_parse_mode(monkeypatch):
     class Service:
         async def get_public_settings(self):
-            return _settings_with_lines("<b>线路</b>\n<a href=\"https://example.com\">入口</a>")
+            return _settings_with_lines('<b>线路</b>\n<a href="https://example.com">入口</a>')
 
         async def get_system_settings(self):
             return type("SystemSettings", (), {"panel_photo_path": None})()
@@ -1462,7 +1643,9 @@ async def test_user_lines_panel_uses_html_parse_mode(monkeypatch):
 
     replaced = []
 
-    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None):
+    async def fake_replace_panel(
+        callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None
+    ):
         replaced.append((text, reply_markup, panel_photo_path, parse_mode))
 
     monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
@@ -1495,7 +1678,9 @@ async def test_user_lines_panel_shows_book_count_when_online(monkeypatch):
 
     replaced = []
 
-    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None):
+    async def fake_replace_panel(
+        callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None
+    ):
         replaced.append((text, reply_markup, panel_photo_path, parse_mode))
 
     monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
@@ -1527,7 +1712,9 @@ async def test_user_lines_panel_omits_book_count_when_none(monkeypatch):
 
     replaced = []
 
-    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None):
+    async def fake_replace_panel(
+        callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None
+    ):
         replaced.append((text, reply_markup, panel_photo_path, parse_mode))
 
     monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
@@ -1562,7 +1749,9 @@ async def test_user_lines_panel_offline_no_book_count(monkeypatch):
 
     replaced = []
 
-    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None):
+    async def fake_replace_panel(
+        callback, text, *, reply_markup=None, panel_photo_path=None, parse_mode=None
+    ):
         replaced.append((text, reply_markup, panel_photo_path, parse_mode))
 
     monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
@@ -1736,6 +1925,7 @@ def _settings(
         points_renewal_enabled=True,
         points_renewal_cost_points=100,
         points_renewal_extension_days=30,
+        expiration_enforcement_enabled=True,
         points_unban_enabled=False,
         points_unban_cost_points=100,
     )
@@ -1744,8 +1934,11 @@ def _settings(
 def _settings_with_lines(server_lines: str) -> PublicSettings:
     settings = _settings()
     return PublicSettings(
-        **{f.name: getattr(settings, f.name) for f in settings.__dataclass_fields__.values()
-           if f.name != "server_lines"},
+        **{
+            f.name: getattr(settings, f.name)
+            for f in settings.__dataclass_fields__.values()
+            if f.name != "server_lines"
+        },
         server_lines=server_lines,
     )
 
@@ -1825,8 +2018,11 @@ def test_user_panel_shows_unban_button_when_disabled_and_feature_enabled():
     profile = TgUser(telegram_id=1, is_disabled=True, abs_user_id="usr_1")
     settings = _settings()
     settings_with_unban = PublicSettings(
-        **{f.name: getattr(settings, f.name) for f in settings.__dataclass_fields__.values()
-           if f.name not in ("points_unban_enabled", "points_unban_cost_points")},
+        **{
+            f.name: getattr(settings, f.name)
+            for f in settings.__dataclass_fields__.values()
+            if f.name not in ("points_unban_enabled", "points_unban_cost_points")
+        },
         points_unban_enabled=True,
         points_unban_cost_points=80,
     )
@@ -1840,8 +2036,11 @@ def test_user_panel_hides_unban_button_when_not_disabled():
     profile = TgUser(telegram_id=1, is_disabled=False, abs_user_id="usr_1")
     settings = _settings()
     settings_with_unban = PublicSettings(
-        **{f.name: getattr(settings, f.name) for f in settings.__dataclass_fields__.values()
-           if f.name not in ("points_unban_enabled", "points_unban_cost_points")},
+        **{
+            f.name: getattr(settings, f.name)
+            for f in settings.__dataclass_fields__.values()
+            if f.name not in ("points_unban_enabled", "points_unban_cost_points")
+        },
         points_unban_enabled=True,
         points_unban_cost_points=80,
     )

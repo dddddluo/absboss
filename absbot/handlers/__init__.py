@@ -38,6 +38,8 @@ from .admin import (
     adjust_expiry_from_payload,
     ask_server_lines,
     run_expiration_check,
+    run_activity_check,
+    run_confirmed_task,
     set_registration_slots,
     target_actions,
 )
@@ -130,6 +132,8 @@ __all__ = [
     "cleanup_group_start_command",
     "pp_entry",
     "run_expiration_check",
+    "run_activity_check",
+    "run_confirmed_task",
     "set_registration_slots",
     "setup_set_disabled_delete",
     "start_entry",

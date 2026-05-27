@@ -11,18 +11,21 @@ from aiogram.methods import SendMessage
 from absbot.backup import list_local_backups
 from absbot.config import Settings
 from absbot.scheduler import (
-    notify_expiration_result,
+    notify_expiration_enforcement_result,
     notify_registration_result,
     process_registration_queue_once,
     run_backup_job,
     run_registration_queue_worker,
     safe_send_message,
+    notify_active_renewal_result,
 )
 from absbot.service import (
     ExpirationProcessResult,
     ExpirationUserResult,
     RegistrationQueueProcessResult,
     SystemSettings,
+    ActivityCheckResult,
+    ActivityUserResult,
 )
 
 
@@ -175,7 +178,7 @@ def _api_error() -> TelegramAPIError:
     )
 
 
-async def test_notify_expiration_result_sends_group_summary_and_disabled_user_dm():
+async def test_notify_expiration_enforcement_result_sends_group_summary_and_disabled_user_dm():
     bot = FakeBot()
     disabled = _user(
         42,
@@ -189,24 +192,61 @@ async def test_notify_expiration_result_sends_group_summary_and_disabled_user_dm
         deleted=[_user(3, "deleted")],
     )
 
-    await notify_expiration_result(bot, _system(), result)
+    await notify_expiration_enforcement_result(bot, _system(), result)
 
-    assert len(bot.sent_messages) == 4
+    assert len(bot.sent_messages) == 3
     assert bot.sent_messages[0][0] == -100123
-    assert "活跃续期：1" in bot.sent_messages[0][1]
-    assert "积分续期：1" in bot.sent_messages[0][1]
+    assert "活跃续期" not in bot.sent_messages[0][1]
+    assert "积分续期" not in bot.sent_messages[0][1]
     assert "已禁用：1" in bot.sent_messages[0][1]
     assert "已删除：1" in bot.sent_messages[0][1]
-    assert bot.sent_messages[3][0] == 42
-    assert "disabled &lt;user&gt;" in bot.sent_messages[3][1]
+    assert bot.sent_messages[2][0] == 42
+    assert "disabled &lt;user&gt;" in bot.sent_messages[2][1]
 
 
-async def test_notify_expiration_result_empty_result_sends_nothing():
+async def test_notify_expiration_enforcement_result_empty_result_sends_nothing():
     bot = FakeBot()
 
-    await notify_expiration_result(bot, _system(), _empty_result())
+    await notify_expiration_enforcement_result(bot, _system(), _empty_result())
 
     assert bot.sent_messages == []
+
+
+async def test_notify_active_renewal_result_sends_group_summary():
+    bot = FakeBot()
+    result = ActivityCheckResult(
+        total_synced=5,
+        active_renewed=[
+            ActivityUserResult(telegram_id=1, abs_user_id="abs-1", abs_username="active")
+        ],
+        disabled=[
+            ActivityUserResult(
+                telegram_id=42,
+                abs_user_id="abs-42",
+                abs_username="disabled",
+                disabled_at=datetime(2026, 5, 21, 4, 10, tzinfo=timezone.utc),
+            )
+        ],
+        deleted=[
+            ActivityUserResult(
+                telegram_id=3,
+                abs_user_id="abs-3",
+                abs_username="deleted",
+                disabled_at=datetime(2026, 5, 20, 4, 10, tzinfo=timezone.utc),
+                deleted_at=datetime(2026, 5, 21, 4, 10, tzinfo=timezone.utc),
+            )
+        ],
+    )
+
+    await notify_active_renewal_result(bot, _system(), result)
+
+    assert len(bot.sent_messages) == 1
+    assert bot.sent_messages[0][0] == -100123
+    assert "活跃续期完成" in bot.sent_messages[0][1]
+    assert "共检测 5 位用户" in bot.sent_messages[0][1]
+    assert "活跃续期：1" in bot.sent_messages[0][1]
+    assert "已禁用" not in bot.sent_messages[0][1]
+    assert "已删除" not in bot.sent_messages[0][1]
 
 
 async def test_notify_registration_result_sends_success_message():

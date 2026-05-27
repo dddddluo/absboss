@@ -53,18 +53,26 @@ def create_scheduler(
         max_instances=1,
     )
     scheduler.add_job(
-        run_activity_job,
+        run_active_renewal_job,
         CronTrigger(hour=3, minute=0, timezone=timezone),
         args=[service, bot],
-        id="daily-activity-check",
+        id="daily-active-renewal",
         replace_existing=True,
         max_instances=1,
     )
     scheduler.add_job(
-        run_expiration_job,
+        run_points_renewal_job,
+        CronTrigger(hour=4, minute=0, timezone=timezone),
+        args=[service, bot],
+        id="daily-points-renewal",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_expiration_enforcement_job,
         CronTrigger(hour=4, minute=10, timezone=timezone),
         args=[service, bot],
-        id="daily-expiration-check",
+        id="daily-expiration-enforcement",
         replace_existing=True,
         max_instances=1,
     )
@@ -95,10 +103,17 @@ def create_scheduler(
     return scheduler
 
 
-async def run_activity_job(service: MembershipService, bot: Bot) -> None:
-    result = await service.process_activity_check()
+async def run_active_renewal_job(
+    service: MembershipService, bot: Bot, *, force: bool = False
+) -> ActivityCheckResult:
+    public = await service.get_public_settings()
+    if not force and not public.active_retention_enabled:
+        logger.info("活跃续期未开启，跳过每日活跃续期任务")
+        return ActivityCheckResult(total_synced=0, disabled=[], deleted=[])
+    result = await service.process_active_renewals(force=force)
     system = await service.get_system_settings()
-    await notify_activity_check_result(bot, system, result)
+    await notify_active_renewal_result(bot, system, result)
+    return result
 
 
 async def run_leaderboard_sync_job(
@@ -156,10 +171,33 @@ async def run_weekly_leaderboard_job(
     await safe_send_message(bot, system.main_group_chat_id, text)
 
 
-async def run_expiration_job(service: MembershipService, bot: Bot) -> ExpirationProcessResult:
-    result = await service.process_expirations()
+async def run_points_renewal_job(
+    service: MembershipService, bot: Bot, *, force: bool = False
+) -> ExpirationProcessResult:
+    public = await service.get_public_settings()
+    if not force and not public.points_renewal_enabled:
+        logger.info("积分续期未开启，跳过积分续期任务")
+        return ExpirationProcessResult(
+            active_renewed=[], points_renewed=[], disabled=[], deleted=[]
+        )
+    result = await service.process_points_renewals(force=force)
     system = await service.get_system_settings()
-    await notify_expiration_result(bot, system, result)
+    await notify_points_renewal_result(bot, system, result)
+    return result
+
+
+async def run_expiration_enforcement_job(
+    service: MembershipService, bot: Bot, *, force: bool = False
+) -> ExpirationProcessResult:
+    public = await service.get_public_settings()
+    if not force and not public.expiration_enforcement_enabled:
+        logger.info("到期检查未开启，跳过到期检查任务")
+        return ExpirationProcessResult(
+            active_renewed=[], points_renewed=[], disabled=[], deleted=[]
+        )
+    result = await service.process_expiration_enforcement(force=force)
+    system = await service.get_system_settings()
+    await notify_expiration_enforcement_result(bot, system, result)
     return result
 
 
@@ -218,9 +256,7 @@ async def notify_registration_result(
             f"线路信息：\n{html.escape(server_lines)}"
         )
     else:
-        text = (
-            f"❌ 注册失败：{html.escape(result.error_message or '未知错误')}\n"
-        )
+        text = f"❌ 注册失败：{html.escape(result.error_message or '未知错误')}\n"
     return await safe_send_message(bot, result.telegram_id, text)
 
 
@@ -325,7 +361,26 @@ def registration_announcement_text(settings) -> str:
     return "📝 注册已关闭\n\n当前名额已满，请等待下次开放。"
 
 
-async def notify_expiration_result(
+async def notify_points_renewal_result(
+    bot: Bot,
+    system: SystemSettings,
+    result: ExpirationProcessResult,
+) -> None:
+    if not result.has_changes:
+        return
+
+    if system.main_group_chat_id is not None:
+        await safe_send_message(
+            bot,
+            system.main_group_chat_id,
+            _points_renewal_group_summary(result),
+        )
+
+    for user in result.points_renewed:
+        await safe_send_message(bot, user.telegram_id, _points_renewed_user_text(user))
+
+
+async def notify_expiration_enforcement_result(
     bot: Bot,
     system: SystemSettings,
     result: ExpirationProcessResult,
@@ -340,9 +395,6 @@ async def notify_expiration_result(
             _expiration_group_summary(result),
         )
 
-    for user in result.points_renewed:
-        await safe_send_message(bot, user.telegram_id, _points_renewed_user_text(user))
-
     for user in result.deleted:
         await safe_send_message(bot, user.telegram_id, _deleted_user_text(user))
 
@@ -350,7 +402,7 @@ async def notify_expiration_result(
         await safe_send_message(bot, user.telegram_id, _disabled_user_text(user))
 
 
-async def notify_activity_check_result(
+async def notify_active_renewal_result(
     bot: Bot,
     system: SystemSettings,
     result: ActivityCheckResult,
@@ -359,10 +411,8 @@ async def notify_activity_check_result(
         await safe_send_message(
             bot,
             system.main_group_chat_id,
-            _activity_check_group_summary(result),
+            _active_renewal_group_summary(result),
         )
-    for user in result.disabled:
-        await safe_send_message(bot, user.telegram_id, _activity_disabled_user_text(user))
 
 
 async def safe_send_message(
@@ -403,9 +453,7 @@ async def safe_send_message(
 
 def _expiration_group_summary(result: ExpirationProcessResult) -> str:
     lines = [
-        "<b>每日到期处理完成</b>",
-        f"活跃续期：{len(result.active_renewed)}",
-        f"积分续期：{len(result.points_renewed)}",
+        "<b>到期检查完成</b>",
         f"已禁用：{len(result.disabled)}",
         f"已删除：{len(result.deleted)}",
     ]
@@ -415,6 +463,17 @@ def _expiration_group_summary(result: ExpirationProcessResult) -> str:
     if result.deleted:
         deleted = "、".join(_user_label(user) for user in result.deleted)
         lines.append(f"删除用户：{deleted}")
+    return "\n".join(lines)
+
+
+def _points_renewal_group_summary(result: ExpirationProcessResult) -> str:
+    lines = [
+        "<b>积分续期完成</b>",
+        f"积分续期：{len(result.points_renewed)}",
+    ]
+    if result.points_renewed:
+        renewed = "、".join(_user_label(user) for user in result.points_renewed)
+        lines.append(f"续期用户：{renewed}")
     return "\n".join(lines)
 
 
@@ -442,7 +501,7 @@ def _deleted_user_text(user: ExpirationUserResult) -> str:
     account = _user_label(user)
     lines = [
         "<b>账号已删除</b>",
-        f"你的 Audiobookshelf 账号 {account} 因长期到期未续费，已被系统删除。",
+        f"你的 Audiobookshelf 账号 {account} 因禁用后超过保留天数，已被系统删除。",
     ]
     return "\n".join(lines)
 
@@ -453,23 +512,17 @@ def _user_label(user: ExpirationUserResult) -> str:
     return html.escape(user.abs_user_id)
 
 
-def _activity_check_group_summary(result: ActivityCheckResult) -> str:
+def _active_renewal_group_summary(result: ActivityCheckResult) -> str:
     lines = [
-        "<b>活跃检测完成</b>",
+        "<b>活跃续期完成</b>",
         f"共检测 {result.total_synced} 位用户",
-        f"已禁用：{len(result.disabled)}",
-        f"已删除：{len(result.deleted)}",
+        f"活跃续期：{len(result.active_renewed)}",
     ]
-    if result.disabled:
+    if result.active_renewed:
         names = "、".join(
-            html.escape(u.abs_username or u.abs_user_id) for u in result.disabled
+            html.escape(u.abs_username or u.abs_user_id) for u in result.active_renewed
         )
-        lines.append(f"禁用用户：{names}")
-    if result.deleted:
-        names = "、".join(
-            html.escape(u.abs_username or u.abs_user_id) for u in result.deleted
-        )
-        lines.append(f"删除用户：{names}")
+        lines.append(f"续期用户：{names}")
     return "\n".join(lines)
 
 

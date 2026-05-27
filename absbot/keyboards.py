@@ -25,7 +25,7 @@ def admin_panel_keyboard(
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ 任务控制", callback_data="admin:tasks"),
-        InlineKeyboardButton(text="🔔 签到与解禁设置", callback_data="admin:checkin_unban")
+        InlineKeyboardButton(text="🔔 签到与解禁设置", callback_data="admin:checkin_unban"),
     )
 
     if is_owner:
@@ -72,11 +72,16 @@ def checkin_unban_panel_keyboard(
     return builder.as_markup()
 
 
-def tasks_panel_keyboard(*, active_enabled: bool, points_enabled: bool) -> InlineKeyboardMarkup:
+def tasks_panel_keyboard(
+    *,
+    active_enabled: bool,
+    points_enabled: bool,
+    expiration_enabled: bool,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
-            text=f"🕒 活跃检测：{'开' if active_enabled else '关'}",
+            text=f"🕒 活跃续期：{'开' if active_enabled else '关'}",
             callback_data="admin:active",
         ),
         InlineKeyboardButton(
@@ -85,14 +90,35 @@ def tasks_panel_keyboard(*, active_enabled: bool, points_enabled: bool) -> Inlin
         ),
     )
     builder.row(
-        InlineKeyboardButton(text="🔍 执行活跃检测", callback_data="admin:run_activity"),
-        InlineKeyboardButton(text="⏰ 执行到期检测", callback_data="admin:run_expiration"),
+        InlineKeyboardButton(
+            text=f"⏰ 到期检查：{'开' if expiration_enabled else '关'}",
+            callback_data="admin:expiration",
+        ),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔍 执行活跃续期", callback_data="admin:confirm_run:active"),
+        InlineKeyboardButton(text="💎 执行积分续期", callback_data="admin:confirm_run:points"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="⏰ 执行到期检查", callback_data="admin:confirm_run:expiration"),
     )
     builder.row(
         InlineKeyboardButton(text="📊 发布每日榜", callback_data="admin:push_leaderboard:daily"),
         InlineKeyboardButton(text="📊 发布每周榜", callback_data="admin:push_leaderboard:weekly"),
     )
     builder.row(InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:home"))
+    return builder.as_markup()
+
+
+def task_confirm_keyboard(task: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ 确认执行",
+            callback_data=f"admin:run_confirmed:{task}",
+        ),
+        InlineKeyboardButton(text="取消", callback_data="admin:run_cancel"),
+    )
     return builder.as_markup()
 
 
@@ -165,7 +191,9 @@ def user_panel_keyboard(
     if is_admin:
         builder.row(InlineKeyboardButton(text="⚙️ 管理面板", callback_data="admin:home"))
     if include_close:
-        builder.row(InlineKeyboardButton(text="❌ 关闭", callback_data=f"close:{profile.telegram_id}"))
+        builder.row(
+            InlineKeyboardButton(text="❌ 关闭", callback_data=f"close:{profile.telegram_id}")
+        )
     return builder.as_markup()
 
 
@@ -188,7 +216,7 @@ def target_user_keyboard(user: TgUser, *, owner_id: int) -> InlineKeyboardMarkup
         )
     builder.row(
         InlineKeyboardButton(text="💎 调整积分", callback_data=f"target:{tid}:points"),
-        InlineKeyboardButton(text="❌ 关闭", callback_data=f"close:{owner_id}")
+        InlineKeyboardButton(text="❌ 关闭", callback_data=f"close:{owner_id}"),
     )
     return builder.as_markup()
 
@@ -240,20 +268,12 @@ def code_list_keyboard(
     if nav:
         builder.row(*nav)
     builder.row(
-        InlineKeyboardButton(
-            text="🗑️ 删除本页", callback_data=f"code:delpage:{code_type}:{page}"
-        ),
-        InlineKeyboardButton(
-            text="🗑️ 删除所有", callback_data=f"code:delall:{code_type}"
-        ),
+        InlineKeyboardButton(text="🗑️ 删除本页", callback_data=f"code:delpage:{code_type}:{page}"),
+        InlineKeyboardButton(text="🗑️ 删除所有", callback_data=f"code:delall:{code_type}"),
     )
     builder.row(
-        InlineKeyboardButton(
-            text="✅ 删除已使用", callback_data=f"code:delused:{code_type}"
-        ),
-        InlineKeyboardButton(
-            text="⭕ 删除未使用", callback_data=f"code:delunused:{code_type}"
-        ),
+        InlineKeyboardButton(text="✅ 删除已使用", callback_data=f"code:delused:{code_type}"),
+        InlineKeyboardButton(text="⭕ 删除未使用", callback_data=f"code:delunused:{code_type}"),
     )
     builder.row(InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:codes"))
     return builder.as_markup()
@@ -262,10 +282,10 @@ def code_list_keyboard(
 def registration_announcement_keyboard(bot_username: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-            InlineKeyboardButton(
-                text="🚀 开始注册",
-                url=f"https://t.me/{bot_username}?start=register",
-            )
+        InlineKeyboardButton(
+            text="🚀 开始注册",
+            url=f"https://t.me/{bot_username}?start=register",
+        )
     )
     return builder.as_markup()
 
@@ -273,10 +293,10 @@ def registration_announcement_keyboard(bot_username: str) -> InlineKeyboardMarku
 def registration_claim_keyboard(bot_username: str, telegram_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-            InlineKeyboardButton(
-                text="🎁 领取注册资格",
-                url=f"https://t.me/{bot_username}?start=gift_{telegram_id}",
-            )
+        InlineKeyboardButton(
+            text="🎁 领取注册资格",
+            url=f"https://t.me/{bot_username}?start=gift_{telegram_id}",
+        )
     )
     return builder.as_markup()
 
@@ -324,12 +344,8 @@ def backup_panel_keyboard(backups: list[str], owner_id: int) -> InlineKeyboardMa
                 callback_data=f"admin:backup:restore:{filename}",
             )
         )
-    builder.row(
-        InlineKeyboardButton(text="⚡️ 立即备份", callback_data="admin:backup:run")
-    )
-    builder.row(
-        InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:home")
-    )
+    builder.row(InlineKeyboardButton(text="⚡️ 立即备份", callback_data="admin:backup:run"))
+    builder.row(InlineKeyboardButton(text="⬅️ 返回管理面板", callback_data="admin:home"))
     return builder.as_markup()
 
 

@@ -26,6 +26,7 @@ REBIND_REVIEW_SEND_TIMEOUT_SECONDS = 15
 # Chat / command parsing helpers
 # ---------------------------------------------------------------------------
 
+
 def parse_pp_target(message: Message) -> int | None:
     text = (message.text or "").strip()
     parts = text.split(maxsplit=1)
@@ -168,6 +169,7 @@ def format_created_codes_messages(codes: list[str], *, limit: int = 3900) -> lis
 # Permission / auth helpers
 # ---------------------------------------------------------------------------
 
+
 def should_show_setup_notice(
     *,
     is_initialized: bool,
@@ -199,6 +201,7 @@ def _is_admin_message(message: Message, settings: Settings) -> bool:
 # ---------------------------------------------------------------------------
 # Message manipulation helpers
 # ---------------------------------------------------------------------------
+
 
 async def _handle_unauthorized_message(message: Message) -> None:
     try:
@@ -293,6 +296,7 @@ async def _notify_rebind_result(
 # Panel dispatch helpers
 # ---------------------------------------------------------------------------
 
+
 class _BotChatPanelTarget:
     def __init__(self, bot, chat_id: int):
         self.bot = bot
@@ -308,7 +312,9 @@ class _BotChatPanelTarget:
         )
 
     async def answer(self, text, *, reply_markup=None, parse_mode=None):
-        return await self.bot.send_message(self.chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return await self.bot.send_message(
+            self.chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode
+        )
 
 
 async def _panel_photo_path(service: MembershipService) -> str | None:
@@ -391,6 +397,7 @@ async def _send_registration_claim_notice(
 # Error message helpers
 # ---------------------------------------------------------------------------
 
+
 def _telegram_user_mention(telegram_id: int) -> str:
     return f'<a href="tg://user?id={telegram_id}">@{telegram_id}</a>'
 
@@ -415,16 +422,18 @@ def _abs_user_error_message(exc: AudiobookshelfError) -> str:
 # Text builders
 # ---------------------------------------------------------------------------
 
+
 def _admin_panel_text(public: PublicSettings) -> str:
     return (
         "管理员面板\n"
         f"开放注册：{'开' if public.registration_open else '关'}，剩余 {public.registration_slots}\n"
         f"签到：{'开' if public.checkin_enabled else '关'}，"
         f"每次 {public.checkin_min_points}~{public.checkin_max_points} 分\n"
-        f"活跃保号：{'开' if public.active_retention_enabled else '关'}，"
+        f"活跃续期：{'开' if public.active_retention_enabled else '关'}，"
         f"{public.active_retention_window_days} 天内活跃续 {public.active_retention_extension_days} 天\n"
         f"积分续期：{'开' if public.points_renewal_enabled else '关'}，"
         f"{public.points_renewal_cost_points} 分续 {public.points_renewal_extension_days} 天\n"
+        f"到期检查：{'开' if public.expiration_enforcement_enabled else '关'}\n"
         f"积分解禁：{'开' if public.points_unban_enabled else '关'}，"
         f"费用 {public.points_unban_cost_points} 积分"
     )
@@ -518,11 +527,13 @@ def _build_tasks_panel_text(public: PublicSettings, scheduler: AsyncIOScheduler)
 
     return (
         "任务控制面板\n\n"
-        f"🕒 活跃检测：{'开' if public.active_retention_enabled else '关'}"
-        f"（每日 03:00，下次：{fmt_next('daily-activity-check')}）\n"
-        f"   窗口 {public.active_retention_window_days} 天，禁用后留存 {public.active_retention_extension_days} 天\n\n"
+        f"🕒 活跃续期：{'开' if public.active_retention_enabled else '关'}"
+        f"（每日 03:00，下次：{fmt_next('daily-active-renewal')}）\n"
+        f"   窗口 {public.active_retention_window_days} 天，续期 {public.active_retention_extension_days} 天\n\n"
         f"💎 积分续期：{'开' if public.points_renewal_enabled else '关'}"
-        f"（每日 04:10，下次：{fmt_next('daily-expiration-check')}）"
+        f"（每日 04:00，下次：{fmt_next('daily-points-renewal')}）\n\n"
+        f"⏰ 到期检查：{'开' if public.expiration_enforcement_enabled else '关'}"
+        f"（每日 04:10，下次：{fmt_next('daily-expiration-enforcement')}）"
     )
 
 
@@ -556,8 +567,9 @@ def _setup_summary_text(public: PublicSettings, system: SystemSettings) -> str:
         f"📅 默认注册天数：{system.default_register_days} 天\n"
         f"📡 线路：{public.server_lines[:40]}{'…' if len(public.server_lines) > 40 else ''}\n"
         f"🎁 签到：{checkin_status}\n"
-        f"🕒 活跃保号：{active_status}\n"
+        f"🕒 活跃续期：{active_status}\n"
         f"💎 积分续期：{renewal_status}\n"
+        f"⏰ 到期检查：{'开启' if public.expiration_enforcement_enabled else '关闭'}\n"
         f"🖼️ 面板图片：{system.panel_photo_path or '默认'}\n"
         f"🔁 换绑审核群：{system.rebind_review_chat_id if system.rebind_review_chat_id is not None else '未启用'}\n"
         f"🧹 自动删除：{disabled_delete_status}"
