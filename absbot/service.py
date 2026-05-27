@@ -1495,21 +1495,17 @@ class MembershipService:
 
         返回 (deleted_abs_count, deleted_db_count)。
         """
-        try:
-            abs_users = await self.abs_client.list_users()
-            deleted_abs_count = 0
-            for u in abs_users:
-                if u.get("type") != "root":
-                    abs_user_id = u.get("id")
-                    if abs_user_id:
-                        try:
-                            await self.abs_client.delete_user(abs_user_id)
-                            deleted_abs_count += 1
-                        except Exception as e:
-                            logger.warning("清空所有用户：删除 ABS 用户 %s 失败: %s", abs_user_id, e)
-        except Exception as e:
-            logger.warning("清空所有用户：获取 ABS 用户列表失败: %s", e)
-            deleted_abs_count = 0
+        abs_users = await self.abs_client.list_users()
+        deleted_abs_count = 0
+        for u in abs_users:
+            if u.get("type") != "root":
+                abs_user_id = u.get("id")
+                if abs_user_id:
+                    try:
+                        await self.abs_client.delete_user(abs_user_id)
+                        deleted_abs_count += 1
+                    except Exception as e:
+                        logger.warning("清空所有用户：删除 ABS 用户 %s 失败: %s", abs_user_id, e)
 
         async with self.session_factory() as session:
             async with session.begin():

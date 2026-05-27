@@ -891,6 +891,10 @@ async def list_all_users(
     if not await _require_admin(callback, settings):
         return
     page = int(callback.data.rsplit(":", 1)[1])
+    await _show_users_page(callback, service, page=page)
+
+
+async def _show_users_page(callback: CallbackQuery, service: MembershipService, *, page: int) -> None:
     users = await service.list_users(offset=page * 10, limit=10)
     db_count, abs_count, unbound_count = await service.get_user_counts_extended()
     abs_count_str = str(abs_count) if abs_count is not None else "未知"
@@ -996,8 +1000,7 @@ async def clear_do_handler(
         await callback.answer("未知操作", show_alert=True)
         return
 
-    callback.data = "admin:users:0"
-    await list_all_users(callback, service, settings)
+    await _show_users_page(callback, service, page=0)
 
 
 @router.callback_query(F.data.startswith("admin:user:"))

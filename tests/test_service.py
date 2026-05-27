@@ -2301,6 +2301,26 @@ async def test_clear_all_users(session_factory, abs_client):
     assert db_count == 0
 
 
+async def test_clear_all_users_keeps_db_when_abs_user_listing_fails(session_factory, abs_client):
+    service = MembershipService(session_factory, abs_client)
+
+    async with session_factory() as session:
+        async with session.begin():
+            session.add(TgUser(telegram_id=111, abs_user_id="usr_111", abs_username="user1"))
+
+    async def fail_list_users():
+        raise AudiobookshelfError("ABS unavailable")
+
+    abs_client.list_users = fail_list_users
+
+    with pytest.raises(AudiobookshelfError, match="ABS unavailable"):
+        await service.clear_all_users()
+
+    async with session_factory() as session:
+        db_count = await session.scalar(select(func.count()).select_from(TgUser))
+    assert db_count == 1
+
+
 async def test_leaderboard_push_settings(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
 

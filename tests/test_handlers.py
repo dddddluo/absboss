@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 import absbot.handlers as handlers
+import absbot.handlers.admin as admin_handlers
 import absbot.keyboards as keyboards
 import absbot.scheduler as scheduler
 from absbot.abs_client import AudiobookshelfNotFoundError
@@ -120,6 +121,18 @@ class Callback:
 
     async def answer(self, text=None, **kwargs):
         self.answers.append((text, kwargs))
+
+
+class FrozenDataCallback(Callback):
+    @property
+    def data(self):
+        return self._data
+
+    @data.setter
+    def data(self, value):
+        if hasattr(self, "_data"):
+            raise AttributeError("data is frozen")
+        self._data = value
 
 
 class PromptMessage:
@@ -369,6 +382,26 @@ class FakeActivityCheckService:
 
     async def get_public_settings(self):
         return _settings()
+
+
+class FakeClearUsersService:
+    def __init__(self):
+        self.clear_calls = 0
+        self.list_calls = []
+
+    async def clear_all_users(self):
+        self.clear_calls += 1
+        return 2, 3
+
+    async def list_users(self, *, offset=0, limit=10, **kwargs):
+        self.list_calls.append((offset, limit, kwargs))
+        return []
+
+    async def get_user_counts_extended(self):
+        return 0, 1, 1
+
+    async def get_system_settings(self):
+        return FakeSystemSettings(main_group_chat_id=None)
 
 
 class FakeScheduler:
@@ -1197,6 +1230,24 @@ async def test_run_confirmed_active_renewal_sends_completion_message(monkeypatch
     )
 
     assert callback.message.answers == [("✅ 活跃续期已完成，共检测 5 位用户，活跃续期 1 位。", {})]
+    assert replaced
+
+
+async def test_clear_do_handler_refreshes_users_without_mutating_callback_data(monkeypatch):
+    callback = FrozenDataCallback("admin:clear_do:all_users", from_user_id=1001)
+    service = FakeClearUsersService()
+    replaced = []
+
+    async def fake_replace_panel(callback, text, *, reply_markup=None, panel_photo_path=None):
+        replaced.append((text, reply_markup, panel_photo_path))
+
+    monkeypatch.setattr("absbot.handlers.replace_panel", fake_replace_panel)
+
+    await admin_handlers.clear_do_handler(callback, service, FakeSettings(admin_ids={1001}))
+
+    assert service.clear_calls == 1
+    assert service.list_calls == [(0, 10, {})]
+    assert callback.message.answers == [("✅ 【清空所有用户】完成，共删除 2 个 ABS 账号，清除 3 条数据库记录。", {})]
     assert replaced
 
 
