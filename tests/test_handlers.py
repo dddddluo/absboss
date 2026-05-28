@@ -676,6 +676,66 @@ async def test_bot_user_bypasses_membership_middleware():
     assert message.answers == []
 
 
+@pytest.mark.asyncio
+async def test_automatic_forward_bypasses_membership_middleware():
+    middleware = handlers.MainGroupMembershipMiddleware()
+    message = MembershipCheckMessage("/any_command", chat_type="supergroup")
+    message.is_automatic_forward = True
+    service = MembershipCheckService()
+    handled = []
+
+    async def handler(event, data):
+        handled.append((event, data))
+        return "handled"
+
+    result = await middleware(handler, message, {"service": service})
+
+    assert result == "handled"
+    assert handled == [(message, {"service": service})]
+    assert service.system_settings_calls == 0
+    assert message.bot.chat_member_checks == []
+
+
+@pytest.mark.asyncio
+async def test_sender_chat_bypasses_membership_middleware():
+    middleware = handlers.MainGroupMembershipMiddleware()
+    message = MembershipCheckMessage("/any_command", chat_type="supergroup")
+    message.sender_chat = type("Chat", (), {"type": "channel", "id": -100987})()
+    service = MembershipCheckService()
+    handled = []
+
+    async def handler(event, data):
+        handled.append((event, data))
+        return "handled"
+
+    result = await middleware(handler, message, {"service": service})
+
+    assert result == "handled"
+    assert handled == [(message, {"service": service})]
+    assert service.system_settings_calls == 0
+    assert message.bot.chat_member_checks == []
+
+
+@pytest.mark.asyncio
+async def test_service_user_bypasses_membership_middleware():
+    middleware = handlers.MainGroupMembershipMiddleware()
+    message = MembershipCheckMessage("/any_command", chat_type="supergroup")
+    message.from_user = User(777000, is_bot=False)
+    service = MembershipCheckService()
+    handled = []
+
+    async def handler(event, data):
+        handled.append((event, data))
+        return "handled"
+
+    result = await middleware(handler, message, {"service": service})
+
+    assert result == "handled"
+    assert handled == [(message, {"service": service})]
+    assert service.system_settings_calls == 0
+    assert message.bot.chat_member_checks == []
+
+
 def test_uninitialized_start_notice_is_shown_to_owner_or_admin():
     assert (
         should_show_setup_notice(
@@ -1053,14 +1113,15 @@ async def test_sync_registration_announcement_edits_closed_message():
 
     await scheduler.sync_registration_announcement(bot, service)
 
-    assert bot.edited_messages == [
+    assert bot.edited_captions == [
         {
             "chat_id": -100123,
             "message_id": 88,
-            "text": scheduler.registration_announcement_text(service.public_settings),
+            "caption": scheduler.registration_announcement_text(service.public_settings),
             "reply_markup": None,
         }
     ]
+    assert bot.edited_messages == []
     assert bot.sent_messages == []
 
 

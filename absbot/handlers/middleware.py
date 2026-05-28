@@ -34,6 +34,13 @@ class MainGroupMembershipMiddleware(BaseMiddleware):
         if user is None or service is None or bot is None or getattr(user, "is_bot", False):
             return await handler(event, data)
 
+        if getattr(event, "is_automatic_forward", False):
+            return await handler(event, data)
+        if getattr(event, "sender_chat", None) is not None:
+            return await handler(event, data)
+        if getattr(user, "id", None) == 777000:
+            return await handler(event, data)
+
         system = await service.get_system_settings()
         if system.main_group_chat_id is None:
             return await handler(event, data)

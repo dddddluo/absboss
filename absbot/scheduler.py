@@ -319,7 +319,7 @@ async def sync_registration_announcement(
         username = (getattr(me, "username", "") or "").lstrip("@")
         if username:
             reply_markup = registration_announcement_keyboard(username)
-    photo_input = _resolve_announcement_photo(system.panel_photo_path, use_default=is_open)
+    photo_input = _resolve_announcement_photo(system.panel_photo_path, use_default=True)
     chat_id, message_id = await service.get_registration_announcement_message()
     if chat_id is not None and message_id is not None:
         try:
