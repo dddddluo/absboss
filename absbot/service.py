@@ -227,6 +227,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     "main_group_link": "",
     "registration_announcement_chat_id": "",
     "registration_announcement_message_id": "",
+    "registration_announcement_is_open": "false",
     "disabled_delete_after_days": "0",
 }
 
@@ -315,14 +316,16 @@ class MembershipService:
                 values = await self._settings_map(session)
         return self._public_settings(values)
 
-    async def get_registration_announcement_message(self) -> tuple[int | None, int | None]:
+    async def get_registration_announcement_message(self) -> tuple[int | None, int | None, bool]:
         async with self.session_factory() as session:
             values = await self._settings_map(session)
         raw_chat_id = values.get("registration_announcement_chat_id", "").strip()
         raw_message_id = values.get("registration_announcement_message_id", "").strip()
+        raw_is_open = values.get("registration_announcement_is_open", "").strip()
         return (
             int(raw_chat_id) if raw_chat_id else None,
             int(raw_message_id) if raw_message_id else None,
+            _as_bool(raw_is_open) if raw_is_open else False,
         )
 
     async def set_registration_announcement_message(
@@ -330,6 +333,7 @@ class MembershipService:
         *,
         chat_id: int | None,
         message_id: int | None,
+        is_open: bool = False,
     ) -> None:
         async with self.session_factory() as session:
             async with session.begin():
@@ -342,6 +346,11 @@ class MembershipService:
                     session,
                     "registration_announcement_message_id",
                     "" if message_id is None else str(int(message_id)),
+                )
+                await self._set_setting(
+                    session,
+                    "registration_announcement_is_open",
+                    _bool_text(is_open),
                 )
 
     async def set_server_lines(self, text: str) -> None:

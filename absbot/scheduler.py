@@ -183,7 +183,6 @@ async def run_weekly_leaderboard_job(
     await safe_send_message(bot, system.main_group_chat_id, text)
 
 
-
 async def run_points_renewal_job(
     service: MembershipService, bot: Bot, *, force: bool = False
 ) -> ExpirationProcessResult:
@@ -320,8 +319,15 @@ async def sync_registration_announcement(
         if username:
             reply_markup = registration_announcement_keyboard(username)
     photo_input = _resolve_announcement_photo(system.panel_photo_path, use_default=True)
-    chat_id, message_id = await service.get_registration_announcement_message()
-    if chat_id is not None and message_id is not None:
+    chat_id, message_id, prev_is_open = await service.get_registration_announcement_message()
+
+    # Send a new message if it transitions from closed to open.
+    # Otherwise, edit the existing message if it exists.
+    should_edit = (chat_id is not None and message_id is not None) and not (
+        is_open and not prev_is_open
+    )
+
+    if should_edit:
         try:
             if photo_input is not None:
                 await bot.edit_message_caption(
@@ -337,9 +343,15 @@ async def sync_registration_announcement(
                     text=text,
                     reply_markup=reply_markup,
                 )
+            await service.set_registration_announcement_message(
+                chat_id=chat_id,
+                message_id=message_id,
+                is_open=is_open,
+            )
             return
         except TelegramAPIError:
             pass
+
     try:
         if photo_input is not None:
             sent = await bot.send_photo(
@@ -361,6 +373,7 @@ async def sync_registration_announcement(
     await service.set_registration_announcement_message(
         chat_id=sent.chat.id,
         message_id=sent.message_id,
+        is_open=is_open,
     )
 
 
@@ -368,7 +381,7 @@ def registration_announcement_text(settings) -> str:
     if settings.registration_open and settings.registration_slots > 0:
         return (
             "📝 开放注册中\n\n"
-            f"剩余名额：{settings.registration_slots}\n"
+            f"名额：{settings.registration_slots}\n"
             "点击下方按钮私聊机器人以创建您的 Audiobookshelf 账号。"
         )
     return "📝 注册已关闭\n\n当前名额已满，请等待下次开放。"

@@ -186,7 +186,7 @@ def user_panel_keyboard(
         )
     else:
         builder.row(
-            InlineKeyboardButton(text="🔗 绑定旧账", callback_data="me:bind"),
+            InlineKeyboardButton(text="🔗 绑定账号", callback_data="me:bind"),
             InlineKeyboardButton(text="🔄 申请换绑", callback_data="me:rebind"),
         )
     if profile.is_disabled and settings.points_unban_enabled:

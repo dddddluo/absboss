@@ -598,11 +598,11 @@ async def test_create_account_serializes_duplicate_creation_for_same_user(
 async def test_registration_announcement_message_metadata_round_trips(session_factory, abs_client):
     service = MembershipService(session_factory, abs_client)
 
-    await service.set_registration_announcement_message(chat_id=-100123, message_id=42)
-    assert await service.get_registration_announcement_message() == (-100123, 42)
+    await service.set_registration_announcement_message(chat_id=-100123, message_id=42, is_open=True)
+    assert await service.get_registration_announcement_message() == (-100123, 42, True)
 
-    await service.set_registration_announcement_message(chat_id=None, message_id=None)
-    assert await service.get_registration_announcement_message() == (None, None)
+    await service.set_registration_announcement_message(chat_id=None, message_id=None, is_open=False)
+    assert await service.get_registration_announcement_message() == (None, None, False)
 
 
 async def test_bind_existing_account_sets_default_expiration(session_factory, abs_client):

@@ -282,10 +282,15 @@ class MembershipCheckService:
 
 
 class FakeAnnouncementService:
-    def __init__(self, *, public_settings, system_settings, announcement_message=(None, None)):
+    def __init__(
+        self, *, public_settings, system_settings, announcement_message=(None, None, False)
+    ):
         self.public_settings = public_settings
         self.system_settings = system_settings
-        self.announcement_message = announcement_message
+        if len(announcement_message) == 2:
+            self.announcement_message = (announcement_message[0], announcement_message[1], False)
+        else:
+            self.announcement_message = announcement_message
 
     async def get_public_settings(self):
         return self.public_settings
@@ -296,8 +301,8 @@ class FakeAnnouncementService:
     async def get_registration_announcement_message(self):
         return self.announcement_message
 
-    async def set_registration_announcement_message(self, *, chat_id, message_id):
-        self.announcement_message = (chat_id, message_id)
+    async def set_registration_announcement_message(self, *, chat_id, message_id, is_open=False):
+        self.announcement_message = (chat_id, message_id, is_open)
 
 
 class FakeRegistrationSlotService:
@@ -779,7 +784,7 @@ def test_start_keyboard_for_user_without_account_hides_account_actions():
 
     assert "👤 个人信息" not in texts
     assert "🆕 创建账号" in texts
-    assert "🔗 绑定旧账" in texts
+    assert "🔗 绑定账号" in texts
     assert "🔄 申请换绑" in texts
     assert "🎟️ 兑换码" in texts
     assert "📡 查看线路" not in texts
@@ -801,7 +806,7 @@ def test_start_keyboard_for_user_with_account_shows_account_actions():
     assert "🔐 重置密码" in texts
     assert "🗑️ 注销账号" in texts
     assert "🕒 活跃时间" not in texts
-    assert "🔗 绑定旧账" not in texts
+    assert "🔗 绑定账号" not in texts
     assert "🔄 申请换绑" not in texts
     assert "🎁 今日听赏" not in texts
 
@@ -1018,7 +1023,7 @@ def test_bind_and_rebind_buttons_have_callback_data():
     )
     callbacks = _button_callbacks(keyboard)
 
-    assert callbacks["🔗 绑定旧账"] == "me:bind"
+    assert callbacks["🔗 绑定账号"] == "me:bind"
     assert callbacks["🔄 申请换绑"] == "me:rebind"
 
 
@@ -1049,7 +1054,7 @@ def test_registration_announcement_text_reflects_open_and_closed_state():
     closed = _settings(registration_open=False, registration_slots=0)
 
     assert "开放注册中" in scheduler.registration_announcement_text(opened)
-    assert "剩余名额：3" in scheduler.registration_announcement_text(opened)
+    assert "名额：3" in scheduler.registration_announcement_text(opened)
     assert "注册已关闭" in scheduler.registration_announcement_text(closed)
     assert "开放注册中" not in scheduler.registration_announcement_text(closed)
 
@@ -1076,7 +1081,7 @@ async def test_sync_registration_announcement_sends_and_stores_message():
     )
     assert photo_entry["reply_markup"] == "has-keyboard"
     assert bot.sent_messages == []
-    assert service.announcement_message == (-100123, 99)
+    assert service.announcement_message == (-100123, 99, True)
 
 
 async def test_sync_registration_announcement_sends_photo_with_caption():
@@ -1100,7 +1105,7 @@ async def test_sync_registration_announcement_sends_photo_with_caption():
         }
     ]
     assert bot.sent_messages == []
-    assert service.announcement_message == (-100123, 99)
+    assert service.announcement_message == (-100123, 99, True)
 
 
 async def test_sync_registration_announcement_edits_closed_message():
@@ -1147,6 +1152,73 @@ async def test_sync_registration_announcement_edits_photo_caption_when_configure
         }
     ]
     assert bot.edited_messages == []
+
+
+async def test_sync_registration_announcement_closed_to_open_sends_new_message():
+    service = FakeAnnouncementService(
+        public_settings=_settings(registration_open=True, registration_slots=5),
+        system_settings=FakeSystemSettings(main_group_chat_id=-100123),
+        announcement_message=(-100123, 88, False),
+    )
+    bot = FakeAnnouncementBot()
+
+    await scheduler.sync_registration_announcement(bot, service)
+
+    # Since it transitioned from closed to open, it must send a new photo message
+    assert len(bot.sent_photos) == 1
+    assert bot.sent_photos[0]["chat_id"] == -100123
+    # It must not edit the existing message
+    assert bot.edited_captions == []
+    # And the stored announcement message is updated to the new message ID and is_open=True
+    assert service.announcement_message == (-100123, 99, True)
+
+
+async def test_sync_registration_announcement_open_to_open_edits_message():
+    service = FakeAnnouncementService(
+        public_settings=_settings(registration_open=True, registration_slots=4),
+        system_settings=FakeSystemSettings(main_group_chat_id=-100123),
+        announcement_message=(-100123, 88, True),
+    )
+    bot = FakeAnnouncementBot()
+
+    await scheduler.sync_registration_announcement(bot, service)
+
+    # Since it is open to open, it should edit in place
+    assert bot.edited_captions == [
+        {
+            "chat_id": -100123,
+            "message_id": 88,
+            "caption": scheduler.registration_announcement_text(service.public_settings),
+            "reply_markup": "has-keyboard",
+        }
+    ]
+    assert bot.sent_messages == []
+    assert len(bot.sent_photos) == 0
+    assert service.announcement_message == (-100123, 88, True)
+
+
+async def test_sync_registration_announcement_open_to_closed_edits_message():
+    service = FakeAnnouncementService(
+        public_settings=_settings(registration_open=False, registration_slots=0),
+        system_settings=FakeSystemSettings(main_group_chat_id=-100123),
+        announcement_message=(-100123, 88, True),
+    )
+    bot = FakeAnnouncementBot()
+
+    await scheduler.sync_registration_announcement(bot, service)
+
+    # Since it is open to closed, it should edit in place
+    assert bot.edited_captions == [
+        {
+            "chat_id": -100123,
+            "message_id": 88,
+            "caption": scheduler.registration_announcement_text(service.public_settings),
+            "reply_markup": None,
+        }
+    ]
+    assert bot.sent_messages == []
+    assert len(bot.sent_photos) == 0
+    assert service.announcement_message == (-100123, 88, False)
 
 
 async def test_set_registration_slots_syncs_group_announcement(monkeypatch):
@@ -1308,7 +1380,9 @@ async def test_clear_do_handler_refreshes_users_without_mutating_callback_data(m
 
     assert service.clear_calls == 1
     assert service.list_calls == [(0, 10, {})]
-    assert callback.message.answers == [("✅ 【清空所有用户】完成，共删除 2 个 ABS 账号，清除 3 条数据库记录。", {})]
+    assert callback.message.answers == [
+        ("✅ 【清空所有用户】完成，共删除 2 个 ABS 账号，清除 3 条数据库记录。", {})
+    ]
     assert replaced
 
 
