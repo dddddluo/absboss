@@ -366,13 +366,13 @@ async def user_bind_account(
         await message.answer(f"验证账号失败：{html.escape(_abs_user_error_message(exc))}")
         return
     await state.clear()
+    profile = await service.get_profile(message.from_user.id)
+    expires_str = "♾️" if profile.is_whitelisted else format_dt(result.expires_at)
     await send_panel(
         message,
-        "绑定成功\n"
-        f"账号：<code>{html.escape(result.username)}</code>\n"
-        f"到期：{format_dt(result.expires_at)}",
+        f"绑定成功\n账号：<code>{html.escape(result.username)}</code>\n到期：{expires_str}",
         reply_markup=user_panel_keyboard(
-            profile=await service.get_profile(message.from_user.id),
+            profile=profile,
             settings=await service.get_public_settings(),
             is_admin=settings.is_admin(message.from_user.id),
         ),
@@ -472,10 +472,11 @@ async def user_redeem_code(message: Message, state: FSMContext, service: Members
         await message.answer(str(exc))
         return
     await state.clear()
+    expires_str = "♾️" if result.is_whitelisted else format_dt(result.expires_at)
     await message.answer(
         f"{html.escape(result.message)}\n"
         f"注册资格：{result.registration_credits}\n"
         f"白名单：{'是' if result.is_whitelisted else '否'}\n"
         f"积分：{result.points}\n"
-        f"到期：{format_dt(result.expires_at)}"
+        f"到期：{expires_str}"
     )

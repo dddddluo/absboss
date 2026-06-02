@@ -833,10 +833,34 @@ def test_user_panel_text_hides_account_dates_without_abs_account():
     assert "最近播放" not in text
 
 
+def test_user_panel_text_shows_infinity_for_whitelisted_user():
+    text = handlers._user_panel_text(
+        TgUser(
+            telegram_id=1007,
+            abs_user_id="usr_2",
+            abs_username="bob",
+            is_whitelisted=True,
+        )
+    )
+    assert "⏳ 到期：♾️" in text
+
+
 def test_target_user_text_hides_expiration_without_abs_account():
     text = handlers._target_user_text(TgUser(telegram_id=1008))
 
     assert "到期" not in text
+
+
+def test_target_user_text_shows_infinity_for_whitelisted_user():
+    text = handlers._target_user_text(
+        TgUser(
+            telegram_id=1009,
+            abs_user_id="usr_3",
+            abs_username="charlie",
+            is_whitelisted=True,
+        )
+    )
+    assert "⏳ 到期：♾️" in text
 
 
 def test_target_keyboard_without_abs_account_hides_account_management_actions():

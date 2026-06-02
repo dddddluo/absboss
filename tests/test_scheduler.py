@@ -214,6 +214,7 @@ async def test_notify_expiration_enforcement_result_empty_result_sends_nothing()
 
 async def test_notify_active_renewal_result_sends_group_summary():
     from absbot.timeutils import format_dt
+
     bot = FakeBot()
     expires = datetime(2026, 6, 20, 3, 0, tzinfo=timezone.utc)
     result = ActivityCheckResult(
@@ -282,6 +283,30 @@ async def test_notify_registration_result_sends_success_message():
     assert "alice" in text
     assert "secret" in text
     assert "line-a" in text
+
+
+async def test_notify_registration_result_sends_success_message_for_whitelisted_user():
+    bot = FakeBot()
+    result = RegistrationQueueProcessResult(
+        queue_id=1,
+        telegram_id=96001,
+        success=True,
+        username="alice",
+        initial_password="secret",
+        expires_at=datetime(2026, 5, 23, tzinfo=timezone.utc),
+    )
+
+    class FakeProfileService:
+        async def get_profile(self, telegram_id: int):
+            return SimpleNamespace(is_whitelisted=True)
+
+    sent = await notify_registration_result(bot, "line-a", result, service=FakeProfileService())
+
+    assert sent is True
+    assert len(bot.sent_messages) == 1
+    chat_id, text = bot.sent_messages[0]
+    assert chat_id == 96001
+    assert "有效期至：♾️" in text
 
 
 async def test_notify_registration_result_sends_failure_message():
@@ -514,8 +539,10 @@ def _backup_settings(tmp_path, owner_tg_id=777) -> Settings:
 
 async def test_run_backup_job_creates_file_and_sends_to_owner(tmp_path):
     from sqlalchemy.ext.asyncio import create_async_engine
+
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     from absbot.models import Base
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -533,8 +560,10 @@ async def test_run_backup_job_creates_file_and_sends_to_owner(tmp_path):
 
 async def test_run_backup_job_skips_send_when_no_owner(tmp_path):
     from sqlalchemy.ext.asyncio import create_async_engine
+
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     from absbot.models import Base
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -559,8 +588,10 @@ async def test_run_backup_job_cleans_up_old_backups(tmp_path):
         (backup_dir / name).write_text("-- old")
 
     from sqlalchemy.ext.asyncio import create_async_engine
+
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     from absbot.models import Base
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -577,6 +608,7 @@ async def test_run_daily_leaderboard_job_disabled():
     from unittest.mock import AsyncMock
     from types import SimpleNamespace
     from absbot.leaderboard import LeaderboardResult
+
     leaderboard_service = AsyncMock()
     service = AsyncMock()
     public_settings = SimpleNamespace(
@@ -588,16 +620,16 @@ async def test_run_daily_leaderboard_job_disabled():
     )
     service.get_public_settings.return_value = public_settings
     service.get_system_settings.return_value = system_settings
-    
+
     bot = AsyncMock()
-    
+
     from absbot.scheduler import run_daily_leaderboard_job
-    
+
     # Run without force -> should be skipped
     await run_daily_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai")
     leaderboard_service.get_leaderboard.assert_not_called()
     bot.send_message.assert_not_called()
-    
+
     # Run with force -> should run
     leaderboard_service.get_leaderboard.return_value = LeaderboardResult(
         book_entries=[],
@@ -613,6 +645,7 @@ async def test_run_weekly_leaderboard_job_disabled():
     from unittest.mock import AsyncMock
     from types import SimpleNamespace
     from absbot.leaderboard import LeaderboardResult
+
     leaderboard_service = AsyncMock()
     service = AsyncMock()
     public_settings = SimpleNamespace(
@@ -624,16 +657,16 @@ async def test_run_weekly_leaderboard_job_disabled():
     )
     service.get_public_settings.return_value = public_settings
     service.get_system_settings.return_value = system_settings
-    
+
     bot = AsyncMock()
-    
+
     from absbot.scheduler import run_weekly_leaderboard_job
-    
+
     # Run without force -> should be skipped
     await run_weekly_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai")
     leaderboard_service.get_leaderboard.assert_not_called()
     bot.send_message.assert_not_called()
-    
+
     # Run with force -> should run
     leaderboard_service.get_leaderboard.return_value = LeaderboardResult(
         book_entries=[],
@@ -643,4 +676,3 @@ async def test_run_weekly_leaderboard_job_disabled():
     await run_weekly_leaderboard_job(leaderboard_service, service, bot, "Asia/Shanghai", force=True)
     leaderboard_service.get_leaderboard.assert_called_once()
     bot.send_message.assert_called_once()
-

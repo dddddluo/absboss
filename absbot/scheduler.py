@@ -244,7 +244,7 @@ async def process_registration_queue_once(service: MembershipService, bot: Bot) 
     if result is None:
         return False
     public = await service.get_public_settings()
-    delivered = await notify_registration_result(bot, public.server_lines, result)
+    delivered = await notify_registration_result(bot, public.server_lines, result, service)
     if delivered:
         await service.mark_registration_queue_notified(result.queue_id)
     else:
@@ -258,13 +258,22 @@ async def notify_registration_result(
     bot: Bot,
     server_lines: str,
     result: RegistrationQueueProcessResult,
+    service: MembershipService | None = None,
 ) -> bool:
     if result.success:
+        is_whitelisted = False
+        if service is not None:
+            try:
+                profile = await service.get_profile(result.telegram_id)
+                is_whitelisted = profile.is_whitelisted
+            except Exception:
+                pass
+        expires_str = "♾️" if is_whitelisted else format_dt(result.expires_at)
         text = (
             "✅ 账号创建成功\n\n"
             f"用户名：<code>{html.escape(result.username or '')}</code>\n"
             f"初始密码：<code>{html.escape(result.initial_password or '')}</code>\n"
-            f"有效期至：{format_dt(result.expires_at)}\n\n"
+            f"有效期至：{expires_str}\n\n"
             f"线路信息：\n{html.escape(server_lines)}"
         )
     else:

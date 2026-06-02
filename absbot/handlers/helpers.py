@@ -460,9 +460,10 @@ def _user_panel_text(profile) -> str:
     )
     if not profile.abs_user_id:
         return text
+    expires_str = "♾️" if profile.is_whitelisted else format_dt(profile.expires_at)
     return (
         f"{text}\n"
-        f"⏳ 到期：{format_dt(profile.expires_at)}\n"
+        f"⏳ 到期：{expires_str}\n"
         f"🕒 最近登录：{format_dt(profile.last_seen_at)}\n"
         f"🎧 最近播放：{format_dt(profile.last_played_at)}"
     )
@@ -487,11 +488,8 @@ def _target_user_text(profile) -> str:
     )
     if not profile.abs_user_id:
         return f"{text}\n⚠️ 状态：{'已禁用' if profile.is_disabled else '正常'}"
-    return (
-        f"{text}\n"
-        f"⏳ 到期：{format_dt(profile.expires_at)}\n"
-        f"⚠️ 状态：{'已禁用' if profile.is_disabled else '正常'}"
-    )
+    expires_str = "♾️" if profile.is_whitelisted else format_dt(profile.expires_at)
+    return f"{text}\n⏳ 到期：{expires_str}\n⚠️ 状态：{'已禁用' if profile.is_disabled else '正常'}"
 
 
 def _rebind_review_text(request: RebindRequestSnapshot) -> str:
